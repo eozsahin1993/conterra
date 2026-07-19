@@ -1,7 +1,7 @@
-//! The turn-by-turn market row: 4 choices blending procedurally-generated
-//! terrain shapes with any currently-unlocked animal placements (brief:
-//! "RESOLVED: Mixed ... never switches to animal-only"), plus a shuffle
-//! option to discard all 4 for a fresh set.
+//! The turn-by-turn market: two independent rows of up to 4 choices each —
+//! a terrain-shape row (always populated) and an animal-placement row
+//! (populated once at least one species is unlocked, empty before that),
+//! plus a shuffle option that discards both rows for a fresh set.
 
 use crate::balance::{MARKET_ROW_SIZE, SHAPE_SIZE_MAX, SHAPE_SIZE_MIN};
 use crate::board::{is_species_unlocked, Board};
@@ -56,29 +56,47 @@ fn currently_unlocked_species(board: &Board, edges: &[FoodWebEdge]) -> Vec<Speci
         .collect()
 }
 
-/// Generates a fresh 4-option market row. Roughly 40% of slots offer an
-/// unlocked animal placement when any exist; the rest are terrain shapes.
-/// One slot is reserved as a guaranteed terrain shape so the row can never
-/// end up all-animal, per the brief's resolved market-row design ("never
-/// switches to animal-only") — four independent 40% coin flips would
-/// otherwise land on all-animal a small but real fraction of the time,
-/// which gets more likely as more species unlock over a game.
-pub fn generate_market_row(board: &Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> Vec<MarketOption> {
+/// The terrain-shape row: always exactly `MARKET_ROW_SIZE` procedurally
+/// generated shapes.
+pub fn generate_terrain_row(rng: &mut impl Rng) -> Vec<MarketOption> {
+    (0..MARKET_ROW_SIZE).map(|_| random_terrain_shape(rng)).collect()
+}
+
+/// The animal-placement row: up to `MARKET_ROW_SIZE` unlocked species,
+/// sampled with replacement (a single unlocked species can fill more than
+/// one slot). Empty until at least one species is unlocked.
+pub fn generate_animal_row(board: &Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> Vec<MarketOption> {
     let unlocked = currently_unlocked_species(board, edges);
-    let guaranteed_terrain_slot = rng.gen_range(0..MARKET_ROW_SIZE);
+    if unlocked.is_empty() {
+        return Vec::new();
+    }
     (0..MARKET_ROW_SIZE)
-        .map(|slot| {
-            if slot != guaranteed_terrain_slot && !unlocked.is_empty() && rng.gen_bool(0.4) {
-                let species = *unlocked.choose(rng).unwrap();
-                MarketOption::AnimalPlacement {
-                    id: Uuid::new_v4(),
-                    species,
-                }
-            } else {
-                random_terrain_shape(rng)
+        .map(|_| {
+            let species = *unlocked.choose(rng).unwrap();
+            MarketOption::AnimalPlacement {
+                id: Uuid::new_v4(),
+                species,
             }
         })
         .collect()
+}
+
+/// A single fresh terrain-shape option, used to refill one consumed slot in
+/// the terrain row without regenerating the whole row.
+pub fn generate_one_terrain_option(rng: &mut impl Rng) -> MarketOption {
+    random_terrain_shape(rng)
+}
+
+/// A single fresh animal-placement option, used to refill one consumed slot
+/// in the animal row. Returns `None` if nothing is unlocked yet (the slot
+/// is then simply dropped rather than refilled).
+pub fn generate_one_animal_option(board: &Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> Option<MarketOption> {
+    let unlocked = currently_unlocked_species(board, edges);
+    let species = *unlocked.choose(rng)?;
+    Some(MarketOption::AnimalPlacement {
+        id: Uuid::new_v4(),
+        species,
+    })
 }
 
 /// Checks every hex a shape would occupy (after rotation + translation to

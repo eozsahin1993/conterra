@@ -47,7 +47,8 @@ pub struct StateSnapshot {
     pub board_radius: i32,
     pub terrain: Vec<(Hex, Terrain)>,
     pub animals: Vec<(Hex, Species)>,
-    pub market_row: Vec<MarketOption>,
+    pub terrain_row: Vec<MarketOption>,
+    pub animal_row: Vec<MarketOption>,
     pub my_objective: Option<SecretObjective>,
     pub last_growth: Option<Vec<(Species, usize)>>,
 }
@@ -70,7 +71,8 @@ impl StateSnapshot {
             board_radius: session.board.radius,
             terrain: session.board.terrain.iter().map(|(h, t)| (*h, *t)).collect(),
             animals: session.board.animals.iter().map(|(h, s)| (*h, *s)).collect(),
-            market_row: session.market_row.clone(),
+            terrain_row: session.terrain_row.clone(),
+            animal_row: session.animal_row.clone(),
             my_objective: session.my_objective(player_id),
             last_growth: session
                 .last_growth

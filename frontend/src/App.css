@@ -115,6 +115,20 @@
   opacity: 0.6;
 }
 
+.option-row-block {
+  margin-bottom: 12px;
+}
+.option-row-block:last-of-type {
+  margin-bottom: 0;
+}
+.row-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
 .market-panel .market-row {
   display: flex;
   flex-wrap: wrap;

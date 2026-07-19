@@ -37,7 +37,8 @@ export interface StateSnapshot {
   board_radius: number;
   terrain: [Hex, Terrain][];
   animals: [Hex, Species][];
-  market_row: MarketOption[];
+  terrain_row: MarketOption[];
+  animal_row: MarketOption[];
   my_objective: SecretObjective | null;
   last_growth: [Species, number][] | null;
 }

@@ -66,7 +66,8 @@ pub struct GameSession {
     pub current_turn_idx: usize,
     pub turns_taken: u32,
     pub total_turns: u32,
-    pub market_row: Vec<MarketOption>,
+    pub terrain_row: Vec<MarketOption>,
+    pub animal_row: Vec<MarketOption>,
     pub phase: GamePhase,
     pub result: Option<GameResult>,
     pub last_growth: Option<GrowthReport>,
@@ -84,7 +85,8 @@ impl GameSession {
             current_turn_idx: 0,
             turns_taken: 0,
             total_turns: 0,
-            market_row: Vec::new(),
+            terrain_row: Vec::new(),
+            animal_row: Vec::new(),
             phase: GamePhase::Lobby,
             result: None,
             last_growth: None,
@@ -118,7 +120,8 @@ impl GameSession {
         self.turn_order = self.players.iter().map(|p| p.id).collect();
         self.total_turns = self.players.len() as u32 * TOTAL_TURNS_PER_PLAYER;
         crate::board::seed_starting_terrain(&mut self.board, &mut self.rng);
-        self.market_row = market::generate_market_row(&self.board, &self.edges, &mut self.rng);
+        self.terrain_row = market::generate_terrain_row(&mut self.rng);
+        self.animal_row = market::generate_animal_row(&self.board, &self.edges, &mut self.rng);
         self.phase = GamePhase::InProgress;
         Ok(())
     }
@@ -143,31 +146,37 @@ impl GameSession {
         if self.current_player() != Some(player_id) {
             return Err("not your turn".into());
         }
-        let idx = self
-            .market_row
-            .iter()
-            .position(|o| o.id() == option_id)
-            .ok_or("no such market option")?;
-
-        match (&self.market_row[idx], &placement) {
-            (MarketOption::TerrainShape { terrain, offsets, .. }, PlacementInput::Terrain { origin, rotation }) => {
-                if !market::can_place_shape(&self.board, *origin, offsets, *rotation) {
-                    return Err("shape does not fit there".into());
+        if let Some(idx) = self.terrain_row.iter().position(|o| o.id() == option_id) {
+            let PlacementInput::Terrain { origin, rotation } = &placement else {
+                return Err("placement type does not match the chosen market option".into());
+            };
+            let MarketOption::TerrainShape { terrain, offsets, .. } = &self.terrain_row[idx] else {
+                unreachable!("terrain_row only ever holds TerrainShape options");
+            };
+            if !market::can_place_shape(&self.board, *origin, offsets, *rotation) {
+                return Err("shape does not fit there".into());
+            }
+            let placed = market::rotated_translated(offsets, *origin, *rotation);
+            self.board.place_terrain_shape(&placed, *terrain);
+            self.terrain_row[idx] = market::generate_one_terrain_option(&mut self.rng);
+        } else if let Some(idx) = self.animal_row.iter().position(|o| o.id() == option_id) {
+            let PlacementInput::Animal { hex } = &placement else {
+                return Err("placement type does not match the chosen market option".into());
+            };
+            let MarketOption::AnimalPlacement { species, .. } = &self.animal_row[idx] else {
+                unreachable!("animal_row only ever holds AnimalPlacement options");
+            };
+            self.board.place_animal(*hex, *species)?;
+            match market::generate_one_animal_option(&self.board, &self.edges, &mut self.rng) {
+                Some(opt) => self.animal_row[idx] = opt,
+                None => {
+                    self.animal_row.remove(idx);
                 }
-                let placed = market::rotated_translated(offsets, *origin, *rotation);
-                self.board.place_terrain_shape(&placed, *terrain);
-                Ok(())
             }
-            (MarketOption::AnimalPlacement { species, .. }, PlacementInput::Animal { hex }) => {
-                self.board.place_animal(*hex, *species)
-            }
-            _ => Err("placement type does not match the chosen market option".into()),
-        }?;
+        } else {
+            return Err("no such market option".into());
+        }
 
-        self.market_row[idx] = market::generate_market_row(&self.board, &self.edges, &mut self.rng)
-            .into_iter()
-            .next()
-            .unwrap();
         self.advance_turn();
         Ok(())
     }
@@ -179,7 +188,8 @@ impl GameSession {
         if self.current_player() != Some(player_id) {
             return Err("not your turn".into());
         }
-        self.market_row = market::generate_market_row(&self.board, &self.edges, &mut self.rng);
+        self.terrain_row = market::generate_terrain_row(&mut self.rng);
+        self.animal_row = market::generate_animal_row(&self.board, &self.edges, &mut self.rng);
         self.advance_turn();
         Ok(())
     }

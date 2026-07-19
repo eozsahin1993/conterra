@@ -68,7 +68,7 @@ function MarketCard(props: { opt: MarketOption; isMyTurn: boolean }) {
   );
 }
 
-export function MarketRow(props: { options: MarketOption[]; isMyTurn: boolean }) {
+function OptionRow(props: { title: string; options: MarketOption[]; isMyTurn: boolean }) {
   // Keyed by option id (stable UUID from the server) rather than array
   // reference, so TransitionGroup only animates cards that actually entered
   // or left the row, not every card whenever any one option changes.
@@ -80,12 +80,24 @@ export function MarketRow(props: { options: MarketOption[]; isMyTurn: boolean })
   const ids = createMemo(() => props.options.map((o) => o.id));
 
   return (
-    <div class="market-panel">
+    <div class="option-row-block">
+      <div class="row-title">{props.title}</div>
       <div class="market-row">
         <TransitionGroup name="card">
           <For each={ids()}>{(id) => <MarketCard opt={byId()[id]} isMyTurn={props.isMyTurn} />}</For>
         </TransitionGroup>
       </div>
+    </div>
+  );
+}
+
+export function MarketRow(props: { terrainOptions: MarketOption[]; animalOptions: MarketOption[]; isMyTurn: boolean }) {
+  return (
+    <div class="market-panel">
+      <OptionRow title="Terrain shapes" options={props.terrainOptions} isMyTurn={props.isMyTurn} />
+      <Show when={props.animalOptions.length > 0}>
+        <OptionRow title="Animal placements" options={props.animalOptions} isMyTurn={props.isMyTurn} />
+      </Show>
       <div class="market-actions">
         <Show when={selectedOption()}>
           <button onClick={clearSelection}>Cancel selection</button>

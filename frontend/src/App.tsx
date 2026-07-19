@@ -44,7 +44,7 @@ function GameScreen() {
         <div class="side-column">
           <Sidebar snapshot={s()} />
           <Show when={s().phase === "InProgress"}>
-            <MarketRow options={s().market_row} isMyTurn={isMyTurn()} />
+            <MarketRow terrainOptions={s().terrain_row} animalOptions={s().animal_row} isMyTurn={isMyTurn()} />
           </Show>
         </div>
       </div>
