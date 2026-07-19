@@ -89,4 +89,4 @@ pub const GROUP_THRESHOLD_MIN_CONTIGUOUS_TERRAIN_CHAIN: usize = 6;
 /// called out explicitly in the brief; picked so a session with the
 /// generous board radius above has room to fill in meaningfully without
 /// dragging (retune once played).
-pub const TOTAL_TURNS_PER_PLAYER: u32 = 10;
+pub const TOTAL_TURNS_PER_PLAYER: u32 = 50;
