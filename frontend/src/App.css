@@ -1,0 +1,248 @@
+.lobby-screen {
+  max-width: 480px;
+  margin: 10vh auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lobby-row {
+  display: flex;
+  gap: 8px;
+}
+.lobby-row input {
+  flex: 1;
+}
+
+.game-screen {
+  padding: 12px 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.turn-banner {
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  margin-bottom: 12px;
+}
+.turn-banner.mine {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.board-wrap {
+  flex: 1 1 500px;
+  min-width: 0;
+}
+
+.board-svg {
+  width: 100%;
+  height: auto;
+  max-height: 82vh;
+  display: block;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+.board-svg.armed {
+  cursor: crosshair;
+  outline: 2px solid var(--accent);
+}
+
+.hex-tile {
+  stroke: rgba(0, 0, 0, 0.4);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.animal-token {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.animal-token circle {
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 1.5;
+}
+.animal-token text {
+  fill: #111;
+  font-weight: 700;
+  user-select: none;
+}
+
+.side-column {
+  flex: 0 1 340px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.players-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.players-list li {
+  padding: 2px 0;
+  color: var(--text-dim);
+}
+.players-list li.current {
+  color: var(--accent);
+  font-weight: 700;
+}
+.players-list li.me::after {
+  content: " (you)";
+  opacity: 0.6;
+}
+
+.market-panel .market-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 108px;
+}
+
+.market-card {
+  width: 96px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 6px;
+  text-align: center;
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.market-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.market-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.card-label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.shape-preview {
+  width: 100%;
+  height: 60px;
+}
+.rotate-row {
+  margin-top: 4px;
+}
+
+.market-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.error-toast {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  background: var(--danger);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 6px;
+  max-width: 320px;
+  z-index: 20;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+.modal-box {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 520px;
+  width: 90%;
+}
+.modal-box ul {
+  padding-left: 20px;
+}
+
+/* Enter/exit transitions driven by solid-transition-group. Each new hex
+   tile, animal token, or market card pops in/out individually — this is
+   the concrete payoff of fine-grained per-item reactivity: a growth pass
+   that spawns tokens across the board animates every new token in place
+   with zero manual diffing. */
+.tile-enter,
+.token-enter,
+.card-enter {
+  opacity: 0;
+  transform: scale(0.2);
+}
+.tile-enter-active,
+.token-enter-active,
+.card-enter-active {
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+.tile-enter-to,
+.token-enter-to,
+.card-enter-to {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.tile-exit,
+.token-exit,
+.card-exit {
+  opacity: 1;
+  transform: scale(1);
+}
+.tile-exit-active,
+.token-exit-active,
+.card-exit-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+.tile-exit-to,
+.token-exit-to,
+.card-exit-to {
+  opacity: 0;
+  transform: scale(0.2);
+}
+
+@media (max-width: 760px) {
+  .side-column {
+    flex: 1 1 100%;
+  }
+  .board-svg {
+    max-height: 60vh;
+  }
+}
