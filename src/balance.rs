@@ -5,9 +5,9 @@
 //! retune from actual playtests rather than from first principles.
 
 /// Board radius (see `Hex::spiral_from_origin`) — "generous grid size as the
-/// primary lever against placement difficulty." Radius 8 is ~217 tiles,
+/// primary lever against placement difficulty." Radius 6 is ~127 tiles,
 /// generous for a 1-6 player game.
-pub const BOARD_RADIUS: i32 = 8;
+pub const BOARD_RADIUS: i32 = 6;
 
 /// Market row size — fixed by the brief ("4 selections"), not tunable.
 pub const MARKET_ROW_SIZE: usize = 4;
