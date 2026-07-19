@@ -16,21 +16,25 @@ const TERRAIN_COLORS: Record<string, string> = {
 };
 
 function ShapePreview(props: { opt: Extract<MarketOption, { type: "TerrainShape" }>; rotationSteps: number }) {
-  const pixels = createMemo(() =>
-    props.opt.offsets.map((o) => hexToPixel(rotateHex(o, props.rotationSteps), PREVIEW_HEX_SIZE)),
+  const cells = createMemo(() =>
+    props.opt.offsets.map((o, i) => ({
+      p: hexToPixel(rotateHex(o, props.rotationSteps), PREVIEW_HEX_SIZE),
+      terrain: props.opt.terrains[i],
+    })),
   );
   return (
     <svg viewBox="-45 -45 90 90" class="shape-preview">
-      <For each={pixels()}>
-        {(p) => (
-          <polygon
-            points={hexPolygonPoints(p.x, p.y, PREVIEW_HEX_SIZE)}
-            fill={TERRAIN_COLORS[props.opt.terrain]}
-          />
+      <For each={cells()}>
+        {(cell) => (
+          <polygon points={hexPolygonPoints(cell.p.x, cell.p.y, PREVIEW_HEX_SIZE)} fill={TERRAIN_COLORS[cell.terrain]} />
         )}
       </For>
     </svg>
   );
+}
+
+function distinctTerrains(opt: Extract<MarketOption, { type: "TerrainShape" }>): string {
+  return Array.from(new Set(opt.terrains)).join(" + ");
 }
 
 function MarketCard(props: { opt: MarketOption; isMyTurn: boolean }) {
@@ -46,7 +50,7 @@ function MarketCard(props: { opt: MarketOption; isMyTurn: boolean }) {
         when={props.opt.type === "TerrainShape"}
         fallback={<div class="card-label">Place {prettySpecies((props.opt as any).species)}</div>}
       >
-        <div class="card-label">{(props.opt as any).terrain}</div>
+        <div class="card-label">{distinctTerrains(props.opt as Extract<MarketOption, { type: "TerrainShape" }>)}</div>
         <ShapePreview
           opt={props.opt as Extract<MarketOption, { type: "TerrainShape" }>}
           rotationSteps={isSelected() ? rotation() : 0}

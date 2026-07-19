@@ -16,7 +16,10 @@ export interface Hex {
 export type GamePhase = "Lobby" | "InProgress" | "Ended";
 
 export type MarketOption =
-  | { type: "TerrainShape"; id: string; terrain: Terrain; offsets: Hex[] }
+  // `terrains` is parallel to `offsets` (same index = same hex) — a piece
+  // mixes 2-3 distinct terrain types across its fixed 4 hexes, never one
+  // uniform terrain.
+  | { type: "TerrainShape"; id: string; offsets: Hex[]; terrains: Terrain[] }
   | { type: "AnimalPlacement"; id: string; species: Species };
 
 export type SecretObjective =
@@ -41,6 +44,7 @@ export interface StateSnapshot {
   animal_row: MarketOption[];
   my_objective: SecretObjective | null;
   last_growth: [Species, number][] | null;
+  last_consumed: [Species, number][] | null;
 }
 
 export interface PlayerResult {

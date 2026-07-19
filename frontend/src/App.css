@@ -97,6 +97,11 @@
   padding: 12px;
 }
 
+.consumed-line {
+  color: #c62828;
+  margin-top: 4px;
+}
+
 .players-list {
   list-style: none;
   margin: 8px 0;

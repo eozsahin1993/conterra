@@ -45,6 +45,11 @@ export function Sidebar(props: { snapshot: StateSnapshot }) {
               <For each={s().last_growth}>{([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} +${n}`}</For>
             </Show>
           </div>
+          <Show when={s().last_consumed && s().last_consumed!.length}>
+            <div class="consumed-line">
+              <For each={s().last_consumed}>{([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} -${n} eaten`}</For>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>

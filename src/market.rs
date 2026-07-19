@@ -3,7 +3,7 @@
 //! (populated once at least one species is unlocked, empty before that),
 //! plus a shuffle option that discards both rows for a fresh set.
 
-use crate::balance::{MARKET_ROW_SIZE, SHAPE_SIZE_MAX, SHAPE_SIZE_MIN};
+use crate::balance::{MARKET_ROW_SIZE, TERRAIN_SHAPE_MAX_DISTINCT, TERRAIN_SHAPE_MIN_DISTINCT, TERRAIN_SHAPE_SIZE};
 use crate::board::{is_species_unlocked, Board};
 use crate::hex::{grow_shape, Hex};
 use crate::species::{self, FoodWebEdge, Species};
@@ -18,9 +18,12 @@ use uuid::Uuid;
 pub enum MarketOption {
     TerrainShape {
         id: Uuid,
-        terrain: Terrain,
         /// Offsets relative to a seed hex at (0,0), pre-rotation.
         offsets: Vec<Hex>,
+        /// Per-hex terrain, parallel to `offsets` (same index = same hex).
+        /// Always TERRAIN_SHAPE_SIZE long, mixing 2-3 distinct terrain
+        /// types across the piece — never one uniform terrain.
+        terrains: Vec<Terrain>,
     },
     AnimalPlacement {
         id: Uuid,
@@ -37,14 +40,32 @@ impl MarketOption {
     }
 }
 
-fn random_terrain_shape(rng: &mut impl Rng) -> MarketOption {
-    let terrain = *Terrain::ALL.choose(rng).unwrap();
-    let size = rng.gen_range(SHAPE_SIZE_MIN..=SHAPE_SIZE_MAX);
-    let offsets = grow_shape(size, rng);
+/// Generates one terrain-shape piece: a fixed `TERRAIN_SHAPE_SIZE`-hex
+/// cluster whose hexes mix `TERRAIN_SHAPE_MIN_DISTINCT`..=`TERRAIN_SHAPE_MAX_DISTINCT`
+/// distinct terrain types (requirement — never a single uniform terrain).
+/// Every distinct terrain chosen is guaranteed to cover at least one hex;
+/// the remaining hexes are filled randomly from the same chosen set.
+pub fn random_terrain_shape(rng: &mut impl Rng) -> MarketOption {
+    let offsets = grow_shape(TERRAIN_SHAPE_SIZE, rng);
+
+    let num_distinct = rng.gen_range(TERRAIN_SHAPE_MIN_DISTINCT..=TERRAIN_SHAPE_MAX_DISTINCT);
+    let mut chosen: Vec<Terrain> = Terrain::ALL.to_vec();
+    chosen.shuffle(rng);
+    chosen.truncate(num_distinct);
+
+    // Guarantee every chosen terrain covers >=1 hex, then fill the rest
+    // randomly from the same set, then shuffle so coverage isn't always
+    // on the first `num_distinct` offsets.
+    let mut terrains: Vec<Terrain> = chosen.clone();
+    while terrains.len() < offsets.len() {
+        terrains.push(*chosen.choose(rng).unwrap());
+    }
+    terrains.shuffle(rng);
+
     MarketOption::TerrainShape {
         id: Uuid::new_v4(),
-        terrain,
         offsets,
+        terrains,
     }
 }
 

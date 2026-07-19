@@ -1,7 +1,6 @@
 use crate::hex::Hex;
 use crate::species::{self, FoodWebEdge, Species};
 use crate::terrain::Terrain;
-use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -34,11 +33,13 @@ impl Board {
     }
 
     /// Places a whole procedurally-grown shape at once, given already
-    /// rotated+translated absolute hex positions. Caller has already
-    /// verified every hex is a legal placement (see `market::can_place_shape`).
-    pub fn place_terrain_shape(&mut self, absolute_hexes: &[Hex], terrain: Terrain) {
-        for hex in absolute_hexes {
-            self.terrain.insert(*hex, terrain);
+    /// rotated+translated absolute hex positions paired with their per-hex
+    /// terrain (parallel to a `MarketOption::TerrainShape`'s `terrains`).
+    /// Caller has already verified every hex is a legal placement (see
+    /// `market::can_place_shape`).
+    pub fn place_terrain_shape(&mut self, placements: &[(Hex, Terrain)]) {
+        for (hex, terrain) in placements {
+            self.terrain.insert(*hex, *terrain);
         }
     }
 
@@ -122,39 +123,27 @@ impl Board {
     }
 }
 
-/// Seeds a random starting cluster before the first turn — 1 to
-/// `START_CLUSTER_MAX_TERRAINS` distinct terrain patches, grown outward from
-/// the origin so they end up touching, giving players an immediate foothold
-/// of up to 3 different ecosystems instead of a fully blank grid.
+/// Seeds the board with one random starting tile before the first turn —
+/// the same fixed 4-hex, 2-3-distinct-terrain piece the market row offers,
+/// placed at the origin. Gives players an immediate foothold of up to 3
+/// different ecosystems instead of a fully blank grid.
 pub fn seed_starting_terrain(board: &mut Board, rng: &mut impl Rng) {
-    use crate::balance::{SHAPE_SIZE_MAX, SHAPE_SIZE_MIN, START_CLUSTER_MAX_TERRAINS};
-    use crate::hex::grow_shape;
+    use crate::market::{random_terrain_shape, MarketOption};
 
-    let num_terrains = rng.gen_range(1..=START_CLUSTER_MAX_TERRAINS);
-    let mut terrains: Vec<Terrain> = Terrain::ALL.to_vec();
-    terrains.shuffle(rng);
-    terrains.truncate(num_terrains);
-
-    let mut frontier: Vec<Hex> = vec![Hex::new(0, 0)];
-    for terrain in terrains {
-        frontier.retain(|h| board.is_empty(h));
-        let seed = if frontier.is_empty() {
-            Hex::new(0, 0)
-        } else {
-            *frontier.choose(rng).unwrap()
-        };
-        let size = rng.gen_range(SHAPE_SIZE_MIN..=SHAPE_SIZE_MAX);
-        let shape = grow_shape(size, rng);
-        let absolute: Vec<Hex> = shape
-            .iter()
-            .map(|o| Hex::new(seed.q + o.q, seed.r + o.r))
-            .filter(|h| board.is_empty(h))
-            .collect();
-        for h in &absolute {
-            frontier.extend(board.neighbors_in_bounds(h));
-        }
-        board.place_terrain_shape(&absolute, terrain);
-    }
+    let MarketOption::TerrainShape { offsets, terrains, .. } = random_terrain_shape(rng) else {
+        unreachable!("random_terrain_shape always returns a TerrainShape option");
+    };
+    let rotation = rng.gen_range(0..6);
+    let origin = Hex::new(0, 0);
+    let placements: Vec<(Hex, Terrain)> = offsets
+        .iter()
+        .zip(terrains.iter())
+        .map(|(&o, &t)| {
+            let rotated = crate::hex::rotate(o, rotation);
+            (Hex::new(origin.q + rotated.q, origin.r + rotated.r), t)
+        })
+        .collect();
+    board.place_terrain_shape(&placements);
 }
 
 /// Which of a species' habitat terrains, if any, are currently mature enough

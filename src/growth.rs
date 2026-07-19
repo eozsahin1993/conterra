@@ -5,8 +5,8 @@
 //! except the resulting token placements themselves.
 
 use crate::balance::{
-    PREDATOR_GROWTH_CAP, PREDATOR_GROWTH_PER_ADJACENT_PREY, PREY_CONTENTION_PENALTY,
-    PREY_GROWTH_PER_OPEN_ADJACENT, PREY_PREDATOR_SUPPRESSION,
+    PREDATION_CONSUME_CHANCE, PREDATOR_GROWTH_CAP, PREDATOR_GROWTH_PER_ADJACENT_PREY,
+    PREY_CONTENTION_PENALTY, PREY_GROWTH_PER_OPEN_ADJACENT, PREY_PREDATOR_SUPPRESSION,
 };
 use crate::board::Board;
 use crate::species::{self, FoodWebEdge, Species, Tier};
@@ -73,10 +73,56 @@ fn token_growth_score(board: &Board, edges: &[FoodWebEdge], hex: crate::hex::Hex
 #[derive(Debug, Default, Clone)]
 pub struct GrowthReport {
     pub spawned: HashMap<Species, usize>,
+    pub consumed: HashMap<Species, usize>,
+}
+
+/// Direct predation: each predator token independently rolls a chance to
+/// eat one adjacent prey token outright. Evaluated against the same
+/// pass-start board snapshot as growth (nothing here has been mutated yet),
+/// so a token can't be both a hunter and prey removed by someone else's
+/// roll within the same pass — the removal set is deduped and applied by
+/// the caller once every token has been considered.
+fn run_predation(board: &Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> (HashSet<crate::hex::Hex>, HashMap<Species, usize>) {
+    let mut predators: Vec<(crate::hex::Hex, Species)> = board.animals.iter().map(|(&h, &s)| (h, s)).collect();
+    predators.shuffle(rng);
+
+    let mut eaten: HashSet<crate::hex::Hex> = HashSet::new();
+    let mut consumed: HashMap<Species, usize> = HashMap::new();
+
+    for (hex, species) in predators {
+        if species::tier(edges, species) == Tier::Base {
+            continue;
+        }
+        let terrain = *board
+            .terrain
+            .get(&hex)
+            .expect("animal token always sits on a placed terrain tile");
+        let prey_species = species::prey_of(edges, terrain, species);
+        if prey_species.is_empty() {
+            continue;
+        }
+        let mut targets: Vec<crate::hex::Hex> = board
+            .neighbors_in_bounds(&hex)
+            .into_iter()
+            .filter(|n| !eaten.contains(n))
+            .filter(|n| board.animals.get(n).map(|s| prey_species.contains(s)).unwrap_or(false))
+            .collect();
+        if targets.is_empty() || rng.gen::<f32>() >= PREDATION_CONSUME_CHANCE {
+            continue;
+        }
+        targets.shuffle(rng);
+        let target = targets[0];
+        let prey_species = *board.animals.get(&target).unwrap();
+        eaten.insert(target);
+        *consumed.entry(prey_species).or_insert(0) += 1;
+    }
+
+    (eaten, consumed)
 }
 
 /// Runs one growth pass over the whole board: scores every existing token,
-/// then spawns new tokens of each species onto eligible adjacent tiles.
+/// spawns new tokens of each species onto eligible adjacent tiles, and lets
+/// predators consume adjacent prey.
 pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> GrowthReport {
     let mut tokens_by_species: HashMap<Species, Vec<crate::hex::Hex>> = HashMap::new();
     for (&hex, &sp) in board.animals.iter() {
@@ -123,6 +169,12 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
         }
     }
 
+    let (eaten, consumed) = run_predation(board, edges, rng);
+    report.consumed = consumed;
+
+    for hex in &eaten {
+        board.animals.remove(hex);
+    }
     for (hex, species) in all_spawns {
         board.animals.insert(hex, species);
     }

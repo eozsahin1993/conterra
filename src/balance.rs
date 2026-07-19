@@ -12,15 +12,17 @@ pub const BOARD_RADIUS: i32 = 8;
 /// Market row size — fixed by the brief ("4 selections"), not tunable.
 pub const MARKET_ROW_SIZE: usize = 4;
 
-/// Terrain-shape size range (hexes per procedurally grown shape).
-pub const SHAPE_SIZE_MIN: usize = 3;
-pub const SHAPE_SIZE_MAX: usize = 5;
+/// Every terrain-shape piece — both market-row options and the game's
+/// starting tile — is a fixed 4-hex cluster (requirement, not tunable).
+pub const TERRAIN_SHAPE_SIZE: usize = 4;
 
-/// The board never starts fully blank: a random starting cluster of 1-3
-/// distinct terrain patches (reusing the same shape-size range above) is
-/// seeded before the first turn, so players have an immediate foothold of
-/// up to 3 different ecosystems to build out from rather than an empty grid.
-pub const START_CLUSTER_MAX_TERRAINS: usize = 3;
+/// Each terrain-shape piece mixes 2-3 distinct terrain types across its 4
+/// hexes (requirement) — never a single uniform terrain, and never all 4
+/// hexes different. This is also what makes the game's one random starting
+/// tile ("up to 3 unique different ecosystems") and a market terrain option
+/// the exact same kind of piece.
+pub const TERRAIN_SHAPE_MIN_DISTINCT: usize = 2;
+pub const TERRAIN_SHAPE_MAX_DISTINCT: usize = 3;
 
 /// Shuffling the market row costs the player their placement action for that
 /// turn — simplest possible cost that needed no new resource, kept stateless.
@@ -53,6 +55,15 @@ pub const PREDATOR_GROWTH_PER_ADJACENT_PREY: f32 = 0.75;
 /// Predator growth is capped per pass so a single huge prey glut can't cause
 /// an unbounded single-turn jump.
 pub const PREDATOR_GROWTH_CAP: f32 = 4.0;
+
+/// Direct predation: per growth pass, each predator token with at least one
+/// adjacent eligible prey token has this probability of consuming exactly
+/// one of them (token removed from the board). Independent of
+/// `PREY_PREDATOR_SUPPRESSION` above, which only dampens prey's own growth
+/// score — this is the actual kill. Kept probabilistic (rather than
+/// guaranteed) so a single predator token doesn't deterministically strip
+/// its whole neighborhood every pass.
+pub const PREDATION_CONSUME_CHANCE: f32 = 0.5;
 
 /// Minimum viable population threshold (content doc: "confirmed in shape,
 /// not yet numerically specced"). Social species need this many on-map

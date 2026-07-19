@@ -51,6 +51,7 @@ pub struct StateSnapshot {
     pub animal_row: Vec<MarketOption>,
     pub my_objective: Option<SecretObjective>,
     pub last_growth: Option<Vec<(Species, usize)>>,
+    pub last_consumed: Option<Vec<(Species, usize)>>,
 }
 
 impl StateSnapshot {
@@ -78,6 +79,10 @@ impl StateSnapshot {
                 .last_growth
                 .as_ref()
                 .map(|r| r.spawned.iter().map(|(s, n)| (*s, *n)).collect()),
+            last_consumed: session
+                .last_growth
+                .as_ref()
+                .map(|r| r.consumed.iter().map(|(s, n)| (*s, *n)).collect()),
         }
     }
 }

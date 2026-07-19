@@ -150,14 +150,16 @@ impl GameSession {
             let PlacementInput::Terrain { origin, rotation } = &placement else {
                 return Err("placement type does not match the chosen market option".into());
             };
-            let MarketOption::TerrainShape { terrain, offsets, .. } = &self.terrain_row[idx] else {
+            let MarketOption::TerrainShape { offsets, terrains, .. } = &self.terrain_row[idx] else {
                 unreachable!("terrain_row only ever holds TerrainShape options");
             };
             if !market::can_place_shape(&self.board, *origin, offsets, *rotation) {
                 return Err("shape does not fit there".into());
             }
             let placed = market::rotated_translated(offsets, *origin, *rotation);
-            self.board.place_terrain_shape(&placed, *terrain);
+            let placements: Vec<(Hex, crate::terrain::Terrain)> =
+                placed.into_iter().zip(terrains.iter().copied()).collect();
+            self.board.place_terrain_shape(&placements);
             self.terrain_row[idx] = market::generate_one_terrain_option(&mut self.rng);
         } else if let Some(idx) = self.animal_row.iter().position(|o| o.id() == option_id) {
             let PlacementInput::Animal { hex } = &placement else {
