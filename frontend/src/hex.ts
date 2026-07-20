@@ -6,6 +6,21 @@ export function hexKey(h: Hex): string {
   return `${h.q},${h.r}`;
 }
 
+// Matches the neighbor-direction convention used on the Rust side
+// (`Hex::DIRECTIONS` in src/hex.rs).
+const NEIGHBOR_DIRECTIONS: [number, number][] = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+
+export function hexNeighbors(h: Hex): Hex[] {
+  return NEIGHBOR_DIRECTIONS.map(([dq, dr]) => ({ q: h.q + dq, r: h.r + dr }));
+}
+
 // Pointy-top axial -> pixel, matches the neighbor-direction convention used
 // on the Rust side (src/hex.rs).
 export function hexToPixel(h: Hex, size = HEX_SIZE): { x: number; y: number } {

@@ -17,14 +17,14 @@ export type GamePhase = "Lobby" | "InProgress" | "Ended";
 
 export type Direction = "Rising" | "Flat" | "Falling";
 
-// One animal-occupied tile, including its colony's shared counter and
-// trajectory (adjacent same-species tiles share one counter — see the
-// growth-model note on StateSnapshot below).
+// One animal-occupied tile. Adjacent same-species tiles form one "colony"
+// sharing a single counter/direction/size (src/growth.rs).
 export interface AnimalTileInfo {
   hex: Hex;
   species: Species;
   counter: number;
   direction: Direction;
+  colony_size: number;
 }
 
 export type MarketOption =
@@ -51,16 +51,14 @@ export interface StateSnapshot {
   total_turns: number;
   board_radius: number;
   terrain: [Hex, Terrain][];
-  // Adjacent same-species tiles are one "colony" sharing a single growth
-  // counter (rise/flat/fall, spills over at a top threshold, starves at
-  // zero) — see src/growth.rs. Each tile still reports its own entry here,
-  // but colony-mates all carry the same counter/direction.
   animals: AnimalTileInfo[];
   terrain_row: MarketOption[];
   animal_row: MarketOption[];
   my_objective: SecretObjective | null;
   last_spillover: [Species, number][] | null;
   last_starvation: [Species, number][] | null;
+  colony_spillover_threshold: number;
+  colony_starvation_threshold: number;
 }
 
 export interface PlayerResult {

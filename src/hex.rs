@@ -38,9 +38,7 @@ impl Hex {
         ((self.q - other.q).abs() + (self.r - other.r).abs() + (self.s() - other.s()).abs()) / 2
     }
 
-    /// All hexes within `radius` of the origin — used to build the generously-sized
-    /// shared board (brief: "generous grid size as the primary lever against
-    /// placement difficulty").
+    /// All hexes within `radius` of the origin — the shared board's extent.
     pub fn spiral_from_origin(radius: i32) -> Vec<Hex> {
         let mut out = Vec::new();
         for q in -radius..=radius {
@@ -55,8 +53,6 @@ impl Hex {
 }
 
 /// A random connected cluster of `size` hexes, chain-grown from a seed hex.
-/// Brief: "procedurally-generated shapes ... random connected hex clusters,
-/// chain-grown from a seed hex, for compactness."
 pub fn grow_shape(size: usize, rng: &mut impl rand::Rng) -> Vec<Hex> {
     let mut shape = vec![Hex::new(0, 0)];
     let mut frontier: Vec<Hex> = Hex::new(0, 0).neighbors().to_vec();

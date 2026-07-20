@@ -5,9 +5,8 @@ use crate::balance::{
 use crate::board::Board;
 use crate::species::{self, Species};
 
-/// Minimum viable population threshold (content doc: "a species' relationships
-/// only count toward scoring once its current on-map count meets a
-/// threshold"). Scoring-side only — placement itself stays unrestricted.
+/// A species' relationships only count toward scoring once its on-map
+/// count meets a threshold. Scoring-side only — placement stays unrestricted.
 pub fn meets_minimum_population(board: &Board, species: Species) -> bool {
     let threshold = if species::is_social_species(species) {
         SOCIAL_SPECIES_MIN_POPULATION
@@ -24,8 +23,8 @@ pub struct GroupThresholdStatus {
 }
 
 /// The one shared group threshold gating whether anyone's secret objective
-/// counts at all (brief: "likely a dual condition"). Both a total-population
-/// floor and a contiguous-terrain-corridor floor must hold.
+/// counts at all: a total-population floor and a contiguous-terrain-corridor
+/// floor must both hold.
 pub fn group_threshold_status(board: &Board) -> GroupThresholdStatus {
     let total_population: u32 = Species::ALL.iter().map(|&s| board.animal_count(s) as u32).sum();
     let (_, longest_corridor) = board.longest_terrain_corridor();

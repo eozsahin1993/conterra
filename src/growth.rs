@@ -1,11 +1,8 @@
-//! Unified per-tile-colony growth/starvation/spillover pass (brief:
-//! "Role-based growth, starvation, and spillover — unified into one
-//! bidirectional per-tile counter"). Adjacent same-species tiles are one
-//! colony sharing a single counter (`board::animal_colonies`) — this is the
-//! one real evolution of the original "fully stateless" design: the
-//! counter itself is persistent, but colonies still have no persistent
-//! *identity*, so merges and splits just fall out of recomputing connected
-//! components fresh every pass.
+//! Unified per-tile-colony growth/starvation/spillover pass. Adjacent
+//! same-species tiles are one colony sharing a single counter
+//! (`board::animal_colonies`); colonies have no persistent identity, so
+//! merges and splits just fall out of recomputing connected components
+//! fresh every pass.
 
 use crate::balance::{
     COLONY_SPILLOVER_THRESHOLD, COLONY_STARVATION_THRESHOLD, GROWTH_NONLINEAR_ACCEL_FACTOR,
@@ -28,8 +25,7 @@ pub struct GrowthReport {
 }
 
 /// Every in-bounds neighbor of any colony member tile that isn't itself a
-/// member — the colony's shared "border," aggregated across its whole
-/// footprint rather than one tile's immediate neighbors.
+/// member — the colony's shared border.
 fn colony_border(board: &Board, tiles: &[Hex]) -> Vec<Hex> {
     let members: HashSet<Hex> = tiles.iter().copied().collect();
     let mut border: HashSet<Hex> = HashSet::new();
@@ -43,8 +39,7 @@ fn colony_border(board: &Board, tiles: &[Hex]) -> Vec<Hex> {
     border.into_iter().collect()
 }
 
-/// Favorable/unfavorable conditions compound rather than adding linearly
-/// (brief: "the rate ... is non-linear"), capped so one extreme
+/// Pressure compounds rather than scaling linearly, capped so one extreme
 /// neighborhood can't cause an unbounded single-pass jump.
 fn nonlinear_rate(pressure: f32) -> f32 {
     let rate = pressure * (1.0 + GROWTH_NONLINEAR_ACCEL_FACTOR * pressure.abs());
@@ -121,18 +116,15 @@ struct Outcome {
     starve_tile: Option<Hex>,
 }
 
-/// Runs one growth pass: every colony's counter is advanced by this pass's
-/// rate, colonies at/above the spillover threshold gain one new tile
-/// (merging into whichever colony already occupies that hex, if any, the
-/// next time colonies are recomputed), and colonies at/below the
-/// starvation threshold lose one tile — symmetric, one tile per pass in
-/// either direction, until a starving colony is gone entirely.
+/// Runs one growth pass: advances every colony's counter, spills over one
+/// tile per pass at/above threshold, starves one tile per pass at/below
+/// threshold.
 pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> GrowthReport {
     let colonies = board.animal_colonies();
     let mut report = GrowthReport::default();
 
-    // Phase 1: compute every colony's outcome against the pre-pass board —
-    // nothing is mutated here, so colonies can't see each other's changes.
+    // Compute against the pre-pass board first; nothing is mutated here, so
+    // colonies can't see each other's changes mid-pass.
     let mut outcomes = Vec::with_capacity(colonies.len());
     for colony in &colonies {
         let border = colony_border(board, &colony.tiles);
@@ -183,11 +175,9 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
         });
     }
 
-    // Phase 2: apply. Spillover targets are deduped across colonies here —
-    // two colonies computed against the same pre-pass snapshot could both
-    // have picked the same empty border hex; first-computed wins, the
-    // other simply doesn't get its tile this pass (its counter still
-    // updates normally, it just tries again next pass).
+    // Apply. Spill targets are deduped here — two colonies could have
+    // independently picked the same empty border hex; first wins, the
+    // other just tries again next pass.
     let mut claimed_spill_targets: HashSet<Hex> = HashSet::new();
     for outcome in outcomes {
         if let Some(starve_hex) = outcome.starve_tile {
@@ -201,9 +191,9 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
         }
         if let Some(spill_hex) = outcome.spill_target {
             if claimed_spill_targets.insert(spill_hex) {
-                // Inserted directly rather than through `Board::place_animal`,
-                // which would re-run occupancy/eligibility checks against a
-                // board this phase has already been mutating.
+                // Direct insert, not `Board::place_animal` — that would
+                // re-run eligibility checks against a board already
+                // mutated by this phase.
                 board.animals.insert(spill_hex, outcome.species);
                 board.animal_counters.insert(spill_hex, outcome.new_counter);
                 board.animal_directions.insert(spill_hex, outcome.direction);

@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js";
 import type { StateSnapshot } from "../types";
-import { objectiveText, prettySpecies } from "../format";
+import { objectiveText } from "../format";
 import { gameId, myPlayerId, startGame } from "../store";
 
 export function Sidebar(props: { snapshot: StateSnapshot }) {
@@ -36,24 +36,6 @@ export function Sidebar(props: { snapshot: StateSnapshot }) {
         <div class="panel">
           <b>Your secret objective</b>
           <div>{objectiveText(s().my_objective)}</div>
-        </div>
-
-        <div class="panel">
-          <b>Last growth pass</b>
-          <div>
-            <Show when={s().last_spillover && s().last_spillover!.length} fallback="—">
-              <For each={s().last_spillover}>
-                {([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} spilled over +${n}`}
-              </For>
-            </Show>
-          </div>
-          <Show when={s().last_starvation && s().last_starvation!.length}>
-            <div class="consumed-line">
-              <For each={s().last_starvation}>
-                {([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} starved -${n}`}
-              </For>
-            </div>
-          </Show>
         </div>
       </Show>
     </div>

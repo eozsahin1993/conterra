@@ -5,11 +5,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// A token's current trajectory, derived from its colony's most recently
-/// computed rate. Purely a display concern (brief: "visible symbol per
-/// token ... so players can read a token's trajectory") but persisted on
-/// the board so it's visible between growth passes, not just in the
-/// transient per-pass report.
+/// A token's current trajectory, persisted so it's visible between growth
+/// passes rather than only in the transient per-pass report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Rising,
@@ -23,12 +20,10 @@ pub struct Board {
     valid_hexes: HashSet<Hex>,
     pub terrain: HashMap<Hex, Terrain>,
     pub animals: HashMap<Hex, Species>,
-    /// Persistent per-tile colony counter (brief: "a per-tile running
-    /// counter is now real, persistent, lightweight state"). Every tile in
-    /// a colony (connected component of same-species tiles, see
-    /// `animal_colonies`) always holds the same value — the colony's one
-    /// shared counter, just replicated across its member tiles so colonies
-    /// can merge/split freely without needing a separate stable colony id.
+    /// Persistent per-tile colony counter. Every tile in a colony
+    /// (connected component of same-species tiles, see `animal_colonies`)
+    /// holds the same value, replicated across members so colonies can
+    /// merge/split freely without a separate stable colony id.
     pub animal_counters: HashMap<Hex, f32>,
     pub animal_directions: HashMap<Hex, Direction>,
 }
@@ -54,11 +49,8 @@ impl Board {
         self.in_bounds(hex) && !self.terrain.contains_key(hex)
     }
 
-    /// Places a whole procedurally-grown shape at once, given already
-    /// rotated+translated absolute hex positions paired with their per-hex
-    /// terrain (parallel to a `MarketOption::TerrainShape`'s `terrains`).
-    /// Caller has already verified every hex is a legal placement (see
-    /// `market::can_place_shape`).
+    /// Places an already rotated+translated shape, paired with its per-hex
+    /// terrain. Caller has already verified legality (`market::can_place_shape`).
     pub fn place_terrain_shape(&mut self, placements: &[(Hex, Terrain)]) {
         for (hex, terrain) in placements {
             self.terrain.insert(*hex, *terrain);
@@ -84,16 +76,13 @@ impl Board {
             return Err("tile already has an animal".into());
         }
         self.animals.insert(hex, species);
-        // Baseline counter/direction; if this tile lands adjacent to an
-        // existing same-species colony it'll be picked up and synchronized
-        // to that colony's shared value on the very next growth pass.
+        // Synced to any adjacent colony's shared value on the next pass.
         self.animal_counters.insert(hex, 0.0);
         self.animal_directions.insert(hex, Direction::Flat);
         Ok(())
     }
 
-    /// Removes an animal token and its associated counter/direction state
-    /// together, so the three maps never drift out of sync.
+    /// Removes a token along with its counter/direction state.
     pub fn remove_animal(&mut self, hex: &Hex) {
         self.animals.remove(hex);
         self.animal_counters.remove(hex);
@@ -157,12 +146,8 @@ impl Board {
         self.terrain_tile_count(terrain) >= threshold
     }
 
-    /// Groups every animal tile into colonies: connected components of
-    /// adjacent same-species tiles. Recomputed fresh from the current board
-    /// every time it's called — colonies have no persistent identity, so
-    /// two colonies that grow into each other simply become one colony the
-    /// next time this runs, and a colony that gets split (e.g. by
-    /// starvation removing a connecting tile) simply becomes two.
+    /// Groups animal tiles into colonies: connected components of adjacent
+    /// same-species tiles, recomputed fresh every call.
     pub fn animal_colonies(&self) -> Vec<Colony> {
         let mut visited: HashSet<Hex> = HashSet::new();
         let mut colonies = Vec::new();
@@ -187,15 +172,10 @@ impl Board {
         colonies
     }
 
-    /// The colony's current shared counter. Every member tile is kept in
-    /// sync to the same value by `set_colony_state`, so in the steady state
-    /// any one of them would do; taking the max across all of them is only
-    /// there to sensibly resolve the one moment that invariant is briefly
-    /// broken — two previously-separate colonies (with different counter
-    /// values) just merged into one this pass. Defaults to 0.0 for a
-    /// brand-new tile the growth pass hasn't touched yet. Counters can be
-    /// negative (a starving colony below the starvation threshold) — never
-    /// clamp this to zero.
+    /// The colony's shared counter. Taking the max across member tiles
+    /// only matters the one moment two differently-valued colonies just
+    /// merged this pass; otherwise every member already agrees. Can be
+    /// negative (starving) — never clamp to zero.
     pub fn colony_counter(&self, tiles: &[Hex]) -> f32 {
         tiles
             .iter()
@@ -203,9 +183,7 @@ impl Board {
             .fold(f32::NEG_INFINITY, f32::max)
     }
 
-    /// Writes the same counter value and direction to every member tile of
-    /// a colony, keeping the "one shared counter" invariant intact after a
-    /// growth pass recomputes it.
+    /// Writes the same counter and direction to every member tile.
     pub fn set_colony_state(&mut self, tiles: &[Hex], counter: f32, direction: Direction) {
         for h in tiles {
             self.animal_counters.insert(*h, counter);
@@ -219,10 +197,8 @@ pub struct Colony {
     pub tiles: Vec<Hex>,
 }
 
-/// Seeds the board with one random starting tile before the first turn —
-/// the same fixed 4-hex, 2-3-distinct-terrain piece the market row offers,
-/// placed at the origin. Gives players an immediate foothold of up to 3
-/// different ecosystems instead of a fully blank grid.
+/// Seeds the board with one random starting tile — the same kind of piece
+/// the market row offers — placed at the origin.
 pub fn seed_starting_terrain(board: &mut Board, rng: &mut impl Rng) {
     use crate::market::{random_terrain_shape, MarketOption};
 

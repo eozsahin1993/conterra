@@ -40,11 +40,9 @@ impl MarketOption {
     }
 }
 
-/// Generates one terrain-shape piece: a fixed `TERRAIN_SHAPE_SIZE`-hex
-/// cluster whose hexes mix `TERRAIN_SHAPE_MIN_DISTINCT`..=`TERRAIN_SHAPE_MAX_DISTINCT`
-/// distinct terrain types (requirement — never a single uniform terrain).
-/// Every distinct terrain chosen is guaranteed to cover at least one hex;
-/// the remaining hexes are filled randomly from the same chosen set.
+/// Generates one fixed-size terrain-shape piece mixing 2-3 distinct
+/// terrains — each chosen terrain is guaranteed >=1 hex, the rest filled
+/// randomly from the same set.
 pub fn random_terrain_shape(rng: &mut impl Rng) -> MarketOption {
     let offsets = grow_shape(TERRAIN_SHAPE_SIZE, rng);
 

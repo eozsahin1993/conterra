@@ -256,11 +256,9 @@ pub fn tier(edges: &[FoodWebEdge], species: Species) -> Tier {
     }
 }
 
-/// Social/group-living species called out in the brief ("a single token of a
-/// social/group-living species ... doesn't represent a viable population") —
-/// placeholder list, not yet finalized (brief's Open Questions #6). The
-/// brief's own examples (wolves, elephants, lions) minus Elephant, which was
-/// cut from the roster entirely; Orca (pod-living) added as a clear real fit.
+/// Social/group-living species — a single token doesn't represent a viable
+/// population the way it does for solitary species. Placeholder list, not
+/// yet finalized.
 pub fn is_social_species(species: Species) -> bool {
     matches!(species, Species::Wolf | Species::Lion | Species::Orca)
 }

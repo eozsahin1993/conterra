@@ -73,8 +73,7 @@
 }
 .animal-token circle {
   fill: #fff;
-  stroke: #000;
-  stroke-width: 1.5;
+  /* stroke/stroke-width set inline per-token, colored by growth direction */
 }
 .animal-token text {
   fill: #111;
@@ -100,6 +99,24 @@
 .consumed-line {
   color: #c62828;
   margin-top: 4px;
+}
+
+.colony-tooltip {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.colony-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
 }
 
 .players-list {

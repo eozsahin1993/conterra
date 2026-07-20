@@ -1,7 +1,7 @@
-//! Secret objectives, dealt privately at game start (brief item 5:
-//! "RESOLVED: mixed per-card" — each card is randomly a population target or
-//! a positional/adjacency goal). The server is the sole holder of these; see
-//! `game::GameSession` for the invisibility-to-other-players enforcement.
+//! Secret objectives, dealt privately at game start — each is randomly a
+//! population target or a positional/adjacency goal. The server is the
+//! sole holder of these; see `game::GameSession` for the
+//! invisibility-to-other-players enforcement.
 
 use crate::balance::{SECRET_OBJECTIVE_ADJACENT_TERRAIN_COUNT, SECRET_OBJECTIVE_POPULATION_TARGET};
 use crate::board::Board;
@@ -36,9 +36,8 @@ pub fn deal_objective(rng: &mut impl Rng) -> SecretObjective {
 
 pub struct ObjectiveOutcome {
     pub met: bool,
-    /// Comparable progress value used to rank players within a successful
-    /// group ("only among a successful group does the secret-objective
-    /// comparison determine a winner").
+    /// Comparable progress value used to rank players within a
+    /// successful group.
     pub score: u32,
 }
 
