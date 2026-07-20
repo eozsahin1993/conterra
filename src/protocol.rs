@@ -6,6 +6,7 @@
 use crate::balance::{COLONY_SPILLOVER_THRESHOLD, COLONY_STARVATION_THRESHOLD};
 use crate::board::Direction;
 use crate::game::{GamePhase, GameResult, GameSession, PlacementInput, PlayerId};
+use crate::growth::colony_preview;
 use crate::hex::Hex;
 use crate::market::MarketOption;
 use crate::objectives::SecretObjective;
@@ -18,6 +19,7 @@ use uuid::Uuid;
 #[serde(tag = "type")]
 pub enum ClientMessage {
     Join { name: String },
+    Spectate,
     Start,
     Select { option_id: Uuid, placement: PlacementInput },
     Shuffle,
@@ -39,8 +41,9 @@ pub struct PlayerSummary {
 }
 
 /// One animal-occupied tile, including its colony's shared counter,
-/// trajectory, and current size (see `board::animal_colonies`) — every
-/// tile in a colony reports the same counter/direction/size.
+/// trajectory, size, and the live border factors driving its rate (see
+/// `board::animal_colonies` / `growth::colony_preview`) — every tile in a
+/// colony reports the same values.
 #[derive(Debug, Clone, Serialize)]
 pub struct AnimalTileInfo {
     pub hex: Hex,
@@ -48,6 +51,11 @@ pub struct AnimalTileInfo {
     pub counter: f32,
     pub direction: Direction,
     pub colony_size: usize,
+    pub rate: f32,
+    pub open_adjacent: u32,
+    pub contending_adjacent: u32,
+    pub predator_adjacent: u32,
+    pub prey_adjacent: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,24 +97,41 @@ impl StateSnapshot {
             board_radius: session.board.radius,
             terrain: session.board.terrain.iter().map(|(h, t)| (*h, *t)).collect(),
             animals: {
-                // Recomputed fresh (not read off `last_growth`) so colony_size
-                // is accurate even before the next growth pass runs.
-                let mut colony_size_by_hex: std::collections::HashMap<Hex, usize> = std::collections::HashMap::new();
+                // Recomputed fresh (not read off `last_growth`) so this is
+                // accurate even before the next growth pass runs.
+                struct ColonyView {
+                    size: usize,
+                    rate: f32,
+                    factors: crate::growth::ColonyFactors,
+                }
+                let mut view_by_hex: std::collections::HashMap<Hex, ColonyView> = std::collections::HashMap::new();
                 for colony in session.board.animal_colonies() {
+                    let (factors, rate) = colony_preview(&session.board, session.edges(), &colony);
                     for h in &colony.tiles {
-                        colony_size_by_hex.insert(*h, colony.tiles.len());
+                        view_by_hex.insert(
+                            *h,
+                            ColonyView { size: colony.tiles.len(), rate, factors },
+                        );
                     }
                 }
                 session
                     .board
                     .animals
                     .iter()
-                    .map(|(h, s)| AnimalTileInfo {
-                        hex: *h,
-                        species: *s,
-                        counter: session.board.animal_counters.get(h).copied().unwrap_or(0.0),
-                        direction: session.board.animal_directions.get(h).copied().unwrap_or(Direction::Flat),
-                        colony_size: colony_size_by_hex.get(h).copied().unwrap_or(1),
+                    .map(|(h, s)| {
+                        let view = view_by_hex.get(h);
+                        AnimalTileInfo {
+                            hex: *h,
+                            species: *s,
+                            counter: session.board.animal_counters.get(h).copied().unwrap_or(0.0),
+                            direction: session.board.animal_directions.get(h).copied().unwrap_or(Direction::Flat),
+                            colony_size: view.map(|v| v.size).unwrap_or(1),
+                            rate: view.map(|v| v.rate).unwrap_or(0.0),
+                            open_adjacent: view.map(|v| v.factors.open_adjacent).unwrap_or(0),
+                            contending_adjacent: view.map(|v| v.factors.contending_adjacent).unwrap_or(0),
+                            predator_adjacent: view.map(|v| v.factors.predator_adjacent).unwrap_or(0),
+                            prey_adjacent: view.map(|v| v.factors.prey_adjacent).unwrap_or(0),
+                        }
                     })
                     .collect()
             },

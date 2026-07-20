@@ -46,23 +46,38 @@ fn nonlinear_rate(pressure: f32) -> f32 {
     rate.clamp(-GROWTH_RATE_CAP, GROWTH_RATE_CAP)
 }
 
-/// One colony's raw pressure this pass. A Mid-tier species combines both
-/// components (it's simultaneously prey-role and predator-role within the
-/// same terrain); Apex only ever computes the predator component, Base
-/// only ever the prey component.
-fn colony_pressure(board: &Board, edges: &[FoodWebEdge], colony: &Colony, border: &[Hex]) -> f32 {
+/// The raw counts a colony's rate is built from — surfaced (not just the
+/// blended pressure number) so a player can see *why* a colony is
+/// growing or shrinking: how much open space it has, how many predators
+/// or competing prey border it, how much prey a predator colony can reach.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ColonyFactors {
+    pub open_adjacent: u32,
+    pub contending_adjacent: u32,
+    pub predator_adjacent: u32,
+    pub prey_adjacent: u32,
+}
+
+/// One colony's border factors and resulting pressure this pass. A
+/// Mid-tier species combines both components (it's simultaneously
+/// prey-role and predator-role within the same terrain); Apex only ever
+/// computes the predator component, Base only ever the prey component.
+fn colony_factors_and_pressure(
+    board: &Board,
+    edges: &[FoodWebEdge],
+    colony: &Colony,
+    border: &[Hex],
+) -> (ColonyFactors, f32) {
     let tier = species::tier(edges, colony.species);
+    let mut factors = ColonyFactors::default();
     let mut pressure = 0.0f32;
 
     if tier != Tier::Apex {
-        let mut n_open = 0u32;
-        let mut n_predator = 0u32;
-        let mut n_contention = 0u32;
         for &b in border {
             match board.animals.get(&b) {
                 None => {
                     if board.terrain.contains_key(&b) {
-                        n_open += 1;
+                        factors.open_adjacent += 1;
                     }
                 }
                 Some(&occupant) => {
@@ -71,30 +86,30 @@ fn colony_pressure(board: &Board, edges: &[FoodWebEdge], colony: &Colony, border
                     };
                     let predators = species::predators_of(edges, terrain, colony.species);
                     if predators.contains(&occupant) {
-                        n_predator += 1;
+                        factors.predator_adjacent += 1;
                     } else if species::tier(edges, occupant) != Tier::Apex {
-                        n_contention += 1;
+                        factors.contending_adjacent += 1;
                     }
                 }
             }
         }
-        pressure += n_open as f32 * PREY_GROWTH_PER_OPEN_ADJACENT
-            - n_contention as f32 * PREY_CONTENTION_PENALTY
-            - n_predator as f32 * PREY_PREDATOR_SUPPRESSION;
+        pressure += factors.open_adjacent as f32 * PREY_GROWTH_PER_OPEN_ADJACENT
+            - factors.contending_adjacent as f32 * PREY_CONTENTION_PENALTY
+            - factors.predator_adjacent as f32 * PREY_PREDATOR_SUPPRESSION;
     }
 
     if tier != Tier::Base {
-        let mut n_prey = 0u32;
         for &b in border {
             if let Some(&occupant) = board.animals.get(&b) {
                 let Some(&terrain) = board.terrain.get(&b) else {
                     continue;
                 };
                 if species::prey_of(edges, terrain, colony.species).contains(&occupant) {
-                    n_prey += 1;
+                    factors.prey_adjacent += 1;
                 }
             }
         }
+        let n_prey = factors.prey_adjacent;
         pressure += if n_prey == 0 {
             PREDATOR_FALL_RATE_AT_ZERO_PREY
         } else if n_prey < PREDATOR_MIN_ADJACENT_PREY_THRESHOLD {
@@ -104,7 +119,16 @@ fn colony_pressure(board: &Board, edges: &[FoodWebEdge], colony: &Colony, border
         };
     }
 
-    pressure
+    (factors, pressure)
+}
+
+/// This colony's current factors and the rate a growth pass would apply
+/// right now — used to preview info (e.g. a hover tooltip) without
+/// waiting for or mutating anything.
+pub fn colony_preview(board: &Board, edges: &[FoodWebEdge], colony: &Colony) -> (ColonyFactors, f32) {
+    let border = colony_border(board, &colony.tiles);
+    let (factors, pressure) = colony_factors_and_pressure(board, edges, colony, &border);
+    (factors, nonlinear_rate(pressure))
 }
 
 struct Outcome {
@@ -128,7 +152,7 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
     let mut outcomes = Vec::with_capacity(colonies.len());
     for colony in &colonies {
         let border = colony_border(board, &colony.tiles);
-        let pressure = colony_pressure(board, edges, colony, &border);
+        let (_, pressure) = colony_factors_and_pressure(board, edges, colony, &border);
         let rate = nonlinear_rate(pressure);
         let prev = board.colony_counter(&colony.tiles);
         let new_counter = prev + rate;

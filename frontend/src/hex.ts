@@ -67,6 +67,14 @@ export function hexPolygonPoints(cx: number, cy: number, size: number): string {
     .join(" ");
 }
 
+// Matches `Hex::spiral_from_origin`'s bounds check on the Rust side.
+export function hexInBounds(h: Hex, radius: number): boolean {
+  if (h.q < -radius || h.q > radius) return false;
+  const r1 = Math.max(-radius, -h.q - radius);
+  const r2 = Math.min(radius, -h.q + radius);
+  return h.r >= r1 && h.r <= r2;
+}
+
 export function rotateHex(h: Hex, steps: number): Hex {
   let { q, r } = h;
   let s = -q - r;

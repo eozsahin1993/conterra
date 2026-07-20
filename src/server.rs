@@ -120,6 +120,16 @@ async fn handle_socket(socket: WebSocket, game_id: Uuid, state: AppState) {
         let mut game = game_arc.lock().await;
 
         match client_msg {
+            ClientMessage::Spectate => {
+                if player_id.is_some() {
+                    send_err(&tx, "already joined");
+                    continue;
+                }
+                let id = Uuid::new_v4();
+                player_id = Some(id);
+                game.connections.insert(id, tx.clone());
+                broadcast_state(&game).await;
+            }
             ClientMessage::Join { name } => {
                 if player_id.is_some() {
                     send_err(&tx, "already joined");

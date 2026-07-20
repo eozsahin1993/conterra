@@ -54,9 +54,17 @@ impl Hex {
 
 /// A random connected cluster of `size` hexes, chain-grown from a seed hex.
 pub fn grow_shape(size: usize, rng: &mut impl rand::Rng) -> Vec<Hex> {
-    let mut shape = vec![Hex::new(0, 0)];
-    let mut frontier: Vec<Hex> = Hex::new(0, 0).neighbors().to_vec();
+    grow_region(Hex::new(0, 0), size, &HashSet::new(), rng)
+}
+
+/// Same chain-growth as `grow_shape`, but starting from an arbitrary seed
+/// and never claiming a hex already in `occupied` — used to grow several
+/// adjacent regions (e.g. one per terrain) into one connected piece
+/// without them overlapping.
+pub fn grow_region(seed: Hex, size: usize, occupied: &HashSet<Hex>, rng: &mut impl rand::Rng) -> Vec<Hex> {
+    let mut shape = vec![seed];
     let mut in_shape: HashSet<Hex> = shape.iter().copied().collect();
+    let mut frontier: Vec<Hex> = seed.neighbors().into_iter().filter(|n| !occupied.contains(n)).collect();
 
     while shape.len() < size && !frontier.is_empty() {
         let idx = rng.gen_range(0..frontier.len());
@@ -67,7 +75,7 @@ pub fn grow_shape(size: usize, rng: &mut impl rand::Rng) -> Vec<Hex> {
         in_shape.insert(candidate);
         shape.push(candidate);
         for n in candidate.neighbors() {
-            if !in_shape.contains(&n) {
+            if !in_shape.contains(&n) && !occupied.contains(&n) {
                 frontier.push(n);
             }
         }

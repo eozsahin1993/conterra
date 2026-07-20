@@ -130,6 +130,10 @@ impl GameSession {
         self.turn_order.get(self.current_turn_idx).copied()
     }
 
+    pub fn edges(&self) -> &[FoodWebEdge] {
+        &self.edges
+    }
+
     fn objective_for(&self, player_id: PlayerId) -> Option<SecretObjective> {
         self.players.iter().find(|p| p.id == player_id).and_then(|p| p.objective)
     }
@@ -153,7 +157,7 @@ impl GameSession {
             let MarketOption::TerrainShape { offsets, terrains, .. } = &self.terrain_row[idx] else {
                 unreachable!("terrain_row only ever holds TerrainShape options");
             };
-            if !market::can_place_shape(&self.board, *origin, offsets, *rotation) {
+            if !market::can_place_shape(&self.board, *origin, offsets, terrains, *rotation) {
                 return Err("shape does not fit there".into());
             }
             let placed = market::rotated_translated(offsets, *origin, *rotation);

@@ -25,6 +25,11 @@ export interface AnimalTileInfo {
   counter: number;
   direction: Direction;
   colony_size: number;
+  rate: number;
+  open_adjacent: number;
+  contending_adjacent: number;
+  predator_adjacent: number;
+  prey_adjacent: number;
 }
 
 export type MarketOption =
