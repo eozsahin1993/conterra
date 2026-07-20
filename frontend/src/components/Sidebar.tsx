@@ -41,13 +41,17 @@ export function Sidebar(props: { snapshot: StateSnapshot }) {
         <div class="panel">
           <b>Last growth pass</b>
           <div>
-            <Show when={s().last_growth && s().last_growth!.length} fallback="—">
-              <For each={s().last_growth}>{([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} +${n}`}</For>
+            <Show when={s().last_spillover && s().last_spillover!.length} fallback="—">
+              <For each={s().last_spillover}>
+                {([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} spilled over +${n}`}
+              </For>
             </Show>
           </div>
-          <Show when={s().last_consumed && s().last_consumed!.length}>
+          <Show when={s().last_starvation && s().last_starvation!.length}>
             <div class="consumed-line">
-              <For each={s().last_consumed}>{([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} -${n} eaten`}</For>
+              <For each={s().last_starvation}>
+                {([sp, n], i) => `${i() > 0 ? ", " : ""}${prettySpecies(sp)} starved -${n}`}
+              </For>
             </div>
           </Show>
         </div>

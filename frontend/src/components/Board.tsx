@@ -1,6 +1,6 @@
 import { createMemo, For } from "solid-js";
 import { TransitionGroup } from "solid-transition-group";
-import type { Hex, Species, Terrain } from "../types";
+import type { AnimalTileInfo, Direction, Hex, Terrain } from "../types";
 import { HEX_SIZE, hexKey, hexPolygonPoints, hexToPixel, pixelToHex } from "../hex";
 import { prettySpecies } from "../format";
 
@@ -12,10 +12,21 @@ const TERRAIN_COLORS: Record<Terrain, string> = {
   Mountain: "#757575",
 };
 
+const DIRECTION_SYMBOL: Record<Direction, string> = {
+  Rising: "▲",
+  Flat: "●",
+  Falling: "▼",
+};
+const DIRECTION_COLOR: Record<Direction, string> = {
+  Rising: "#2e7d32",
+  Flat: "#757575",
+  Falling: "#c62828",
+};
+
 export function Board(props: {
   radius: number;
   terrain: [Hex, Terrain][];
-  animals: [Hex, Species][];
+  animals: AnimalTileInfo[];
   armed: boolean;
   onHexClick: (hex: Hex) => void;
 }) {
@@ -34,8 +45,8 @@ export function Board(props: {
   const terrainKeys = createMemo(() => Object.keys(terrainByKey()));
 
   const animalByKey = createMemo(() => {
-    const map: Record<string, { hex: Hex; species: Species }> = {};
-    for (const [hex, species] of props.animals) map[hexKey(hex)] = { hex, species };
+    const map: Record<string, AnimalTileInfo> = {};
+    for (const a of props.animals) map[hexKey(a.hex)] = a;
     return map;
   });
   const animalKeys = createMemo(() => Object.keys(animalByKey()));
@@ -86,10 +97,29 @@ export function Board(props: {
             return (
               <g class="animal-token" transform={`translate(${p().x}, ${p().y})`}>
                 <circle r={HEX_SIZE * 0.42} />
-                <text text-anchor="middle" dominant-baseline="central" font-size={`${HEX_SIZE * 0.42}`}>
+                <text
+                  class="token-letter"
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  font-size={`${HEX_SIZE * 0.38}`}
+                >
                   {entry().species[0]}
                 </text>
-                <title>{prettySpecies(entry().species)}</title>
+                <text
+                  class="token-direction"
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  font-size={`${HEX_SIZE * 0.3}`}
+                  fill={DIRECTION_COLOR[entry().direction]}
+                  x={HEX_SIZE * 0.34}
+                  y={HEX_SIZE * 0.32}
+                >
+                  {DIRECTION_SYMBOL[entry().direction]}
+                </text>
+                <title>
+                  {prettySpecies(entry().species)} — colony counter {entry().counter.toFixed(1)} (
+                  {entry().direction.toLowerCase()})
+                </title>
               </g>
             );
           }}

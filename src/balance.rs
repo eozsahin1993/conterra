@@ -37,33 +37,48 @@ pub const HABITAT_THRESHOLD_BASE: usize = 4;
 pub const HABITAT_THRESHOLD_MID: usize = 6;
 pub const HABITAT_THRESHOLD_APEX: usize = 9;
 
-/// Role-based growth magnitudes (brief: "exact magnitudes ... explicitly
-/// untuned"). All growth is stateless — recomputed fresh from board state
-/// every pass, nothing here accumulates across passes except the resulting
-/// on-map token count.
+/// Unified per-tile-colony growth/starvation counter (brief: "Role-based
+/// growth, starvation, and spillover — unified into one bidirectional
+/// per-tile counter"). Adjacent same-species tiles are treated as one
+/// colony sharing a single counter (see `board::animal_colonies`), so these
+/// magnitudes apply to a colony's aggregate border, not one tile in
+/// isolation. Exact magnitudes explicitly untuned per the brief's open
+/// questions — picked as sane defaults pending real playtests.
 ///
-/// Prey growth per unoccupied adjacent hex.
+/// Prey-role pressure: rises per open/uncontested bordering hex.
 pub const PREY_GROWTH_PER_OPEN_ADJACENT: f32 = 1.0;
-/// Prey growth penalty per adjacent contending prey (a different prey
-/// species sharing adjacent space).
+/// Prey-role pressure penalty per bordering contending prey (a different,
+/// non-apex species competing for the same space).
 pub const PREY_CONTENTION_PENALTY: f32 = 0.5;
-/// Prey growth penalty per adjacent predator (boom-bust, not flat
-/// suppression: this scales with predator count, doesn't just zero growth).
+/// Prey-role pressure penalty per bordering predator (boom-bust, not flat
+/// suppression — scales with predator count, can drive pressure negative).
 pub const PREY_PREDATOR_SUPPRESSION: f32 = 2.0;
-/// Predator growth per adjacent prey token.
-pub const PREDATOR_GROWTH_PER_ADJACENT_PREY: f32 = 0.75;
-/// Predator growth is capped per pass so a single huge prey glut can't cause
-/// an unbounded single-turn jump.
-pub const PREDATOR_GROWTH_CAP: f32 = 4.0;
 
-/// Direct predation: per growth pass, each predator token with at least one
-/// adjacent eligible prey token has this probability of consuming exactly
-/// one of them (token removed from the board). Independent of
-/// `PREY_PREDATOR_SUPPRESSION` above, which only dampens prey's own growth
-/// score — this is the actual kill. Kept probabilistic (rather than
-/// guaranteed) so a single predator token doesn't deterministically strip
-/// its whole neighborhood every pass.
-pub const PREDATION_CONSUME_CHANCE: f32 = 0.5;
+/// Predator-role: minimum bordering prey count for the colony to be
+/// considered thriving (rising) rather than merely surviving (flat).
+pub const PREDATOR_MIN_ADJACENT_PREY_THRESHOLD: u32 = 2;
+/// Predator-role pressure per unit of bordering prey above the minimum
+/// threshold (only applies once at/above the threshold).
+pub const PREDATOR_RISE_RATE_PER_EXCESS_PREY: f32 = 1.0;
+/// Predator-role pressure when there is zero bordering prey at all (falls).
+pub const PREDATOR_FALL_RATE_AT_ZERO_PREY: f32 = -2.0;
+
+/// Non-linear acceleration factor applied to raw pressure: `rate = pressure
+/// * (1 + FACTOR * |pressure|)`. Favorable/unfavorable conditions don't
+/// just add linearly, they compound (brief: "the rate ... is non-linear").
+pub const GROWTH_NONLINEAR_ACCEL_FACTOR: f32 = 0.15;
+/// Hard cap on the magnitude of a single pass's rate, so one extreme
+/// neighborhood can't cause an unbounded single-pass jump.
+pub const GROWTH_RATE_CAP: f32 = 6.0;
+
+/// Top threshold: a colony whose counter is at or above this spills over —
+/// one new tile added to the same colony, on an adjacent open hex matching
+/// one of the colony's own terrains — once per pass, every pass, for as
+/// long as it stays at/above threshold (brief: "~16, placeholder").
+pub const COLONY_SPILLOVER_THRESHOLD: f32 = 16.0;
+/// Bottom threshold: a colony at or below this starves — one tile removed
+/// per pass (symmetric with spillover) until the colony is gone.
+pub const COLONY_STARVATION_THRESHOLD: f32 = 0.0;
 
 /// Minimum viable population threshold (content doc: "confirmed in shape,
 /// not yet numerically specced"). Social species need this many on-map

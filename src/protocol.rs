@@ -4,6 +4,7 @@
 //! the wire entirely — the server is the sole holder of that information,
 //! per the brief's core design constraint.
 
+use crate::board::Direction;
 use crate::game::{GamePhase, GameResult, GameSession, PlacementInput, PlayerId};
 use crate::hex::Hex;
 use crate::market::MarketOption;
@@ -37,6 +38,17 @@ pub struct PlayerSummary {
     pub name: String,
 }
 
+/// One animal-occupied tile, including its colony's shared counter and
+/// trajectory (brief: "visible symbol per token ... alongside the number
+/// if shown directly").
+#[derive(Debug, Clone, Serialize)]
+pub struct AnimalTileInfo {
+    pub hex: Hex,
+    pub species: Species,
+    pub counter: f32,
+    pub direction: Direction,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StateSnapshot {
     pub phase: GamePhase,
@@ -46,12 +58,12 @@ pub struct StateSnapshot {
     pub total_turns: u32,
     pub board_radius: i32,
     pub terrain: Vec<(Hex, Terrain)>,
-    pub animals: Vec<(Hex, Species)>,
+    pub animals: Vec<AnimalTileInfo>,
     pub terrain_row: Vec<MarketOption>,
     pub animal_row: Vec<MarketOption>,
     pub my_objective: Option<SecretObjective>,
-    pub last_growth: Option<Vec<(Species, usize)>>,
-    pub last_consumed: Option<Vec<(Species, usize)>>,
+    pub last_spillover: Option<Vec<(Species, usize)>>,
+    pub last_starvation: Option<Vec<(Species, usize)>>,
 }
 
 impl StateSnapshot {
@@ -71,18 +83,28 @@ impl StateSnapshot {
             total_turns: session.total_turns,
             board_radius: session.board.radius,
             terrain: session.board.terrain.iter().map(|(h, t)| (*h, *t)).collect(),
-            animals: session.board.animals.iter().map(|(h, s)| (*h, *s)).collect(),
+            animals: session
+                .board
+                .animals
+                .iter()
+                .map(|(h, s)| AnimalTileInfo {
+                    hex: *h,
+                    species: *s,
+                    counter: session.board.animal_counters.get(h).copied().unwrap_or(0.0),
+                    direction: session.board.animal_directions.get(h).copied().unwrap_or(Direction::Flat),
+                })
+                .collect(),
             terrain_row: session.terrain_row.clone(),
             animal_row: session.animal_row.clone(),
             my_objective: session.my_objective(player_id),
-            last_growth: session
+            last_spillover: session
                 .last_growth
                 .as_ref()
-                .map(|r| r.spawned.iter().map(|(s, n)| (*s, *n)).collect()),
-            last_consumed: session
+                .map(|r| r.spillovers.iter().map(|(s, n)| (*s, *n)).collect()),
+            last_starvation: session
                 .last_growth
                 .as_ref()
-                .map(|r| r.consumed.iter().map(|(s, n)| (*s, *n)).collect()),
+                .map(|r| r.starvations.iter().map(|(s, n)| (*s, *n)).collect()),
         }
     }
 }

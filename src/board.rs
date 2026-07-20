@@ -5,12 +5,32 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// A token's current trajectory, derived from its colony's most recently
+/// computed rate. Purely a display concern (brief: "visible symbol per
+/// token ... so players can read a token's trajectory") but persisted on
+/// the board so it's visible between growth passes, not just in the
+/// transient per-pass report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Direction {
+    Rising,
+    Flat,
+    Falling,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Board {
     pub radius: i32,
     valid_hexes: HashSet<Hex>,
     pub terrain: HashMap<Hex, Terrain>,
     pub animals: HashMap<Hex, Species>,
+    /// Persistent per-tile colony counter (brief: "a per-tile running
+    /// counter is now real, persistent, lightweight state"). Every tile in
+    /// a colony (connected component of same-species tiles, see
+    /// `animal_colonies`) always holds the same value — the colony's one
+    /// shared counter, just replicated across its member tiles so colonies
+    /// can merge/split freely without needing a separate stable colony id.
+    pub animal_counters: HashMap<Hex, f32>,
+    pub animal_directions: HashMap<Hex, Direction>,
 }
 
 impl Board {
@@ -21,6 +41,8 @@ impl Board {
             valid_hexes,
             terrain: HashMap::new(),
             animals: HashMap::new(),
+            animal_counters: HashMap::new(),
+            animal_directions: HashMap::new(),
         }
     }
 
@@ -62,7 +84,20 @@ impl Board {
             return Err("tile already has an animal".into());
         }
         self.animals.insert(hex, species);
+        // Baseline counter/direction; if this tile lands adjacent to an
+        // existing same-species colony it'll be picked up and synchronized
+        // to that colony's shared value on the very next growth pass.
+        self.animal_counters.insert(hex, 0.0);
+        self.animal_directions.insert(hex, Direction::Flat);
         Ok(())
+    }
+
+    /// Removes an animal token and its associated counter/direction state
+    /// together, so the three maps never drift out of sync.
+    pub fn remove_animal(&mut self, hex: &Hex) {
+        self.animals.remove(hex);
+        self.animal_counters.remove(hex);
+        self.animal_directions.remove(hex);
     }
 
     pub fn terrain_tile_count(&self, terrain: Terrain) -> usize {
@@ -121,6 +156,67 @@ impl Board {
     pub fn terrain_meets_threshold(&self, terrain: Terrain, threshold: usize) -> bool {
         self.terrain_tile_count(terrain) >= threshold
     }
+
+    /// Groups every animal tile into colonies: connected components of
+    /// adjacent same-species tiles. Recomputed fresh from the current board
+    /// every time it's called — colonies have no persistent identity, so
+    /// two colonies that grow into each other simply become one colony the
+    /// next time this runs, and a colony that gets split (e.g. by
+    /// starvation removing a connecting tile) simply becomes two.
+    pub fn animal_colonies(&self) -> Vec<Colony> {
+        let mut visited: HashSet<Hex> = HashSet::new();
+        let mut colonies = Vec::new();
+        for (&start, &species) in self.animals.iter() {
+            if visited.contains(&start) {
+                continue;
+            }
+            let mut stack = vec![start];
+            let mut tiles = Vec::new();
+            visited.insert(start);
+            while let Some(hex) = stack.pop() {
+                tiles.push(hex);
+                for n in hex.neighbors() {
+                    if self.animals.get(&n) == Some(&species) && !visited.contains(&n) {
+                        visited.insert(n);
+                        stack.push(n);
+                    }
+                }
+            }
+            colonies.push(Colony { species, tiles });
+        }
+        colonies
+    }
+
+    /// The colony's current shared counter. Every member tile is kept in
+    /// sync to the same value by `set_colony_state`, so in the steady state
+    /// any one of them would do; taking the max across all of them is only
+    /// there to sensibly resolve the one moment that invariant is briefly
+    /// broken — two previously-separate colonies (with different counter
+    /// values) just merged into one this pass. Defaults to 0.0 for a
+    /// brand-new tile the growth pass hasn't touched yet. Counters can be
+    /// negative (a starving colony below the starvation threshold) — never
+    /// clamp this to zero.
+    pub fn colony_counter(&self, tiles: &[Hex]) -> f32 {
+        tiles
+            .iter()
+            .filter_map(|h| self.animal_counters.get(h).copied())
+            .fold(f32::NEG_INFINITY, f32::max)
+    }
+
+    /// Writes the same counter value and direction to every member tile of
+    /// a colony, keeping the "one shared counter" invariant intact after a
+    /// growth pass recomputes it.
+    pub fn set_colony_state(&mut self, tiles: &[Hex], counter: f32, direction: Direction) {
+        for h in tiles {
+            self.animal_counters.insert(*h, counter);
+            self.animal_directions.insert(*h, direction);
+        }
+    }
+}
+
+pub struct Colony {
+    pub species: Species,
+    pub tiles: Vec<Hex>,
 }
 
 /// Seeds the board with one random starting tile before the first turn —

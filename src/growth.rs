@@ -1,182 +1,215 @@
-//! Role-based, fully stateless growth pass (brief: "computed statelessly —
-//! recomputed fresh from the current board state every growth/scoring pass,
-//! no per-relationship duration or history tracked anywhere"). Every call
-//! looks only at the current board; nothing here persists between passes
-//! except the resulting token placements themselves.
+//! Unified per-tile-colony growth/starvation/spillover pass (brief:
+//! "Role-based growth, starvation, and spillover — unified into one
+//! bidirectional per-tile counter"). Adjacent same-species tiles are one
+//! colony sharing a single counter (`board::animal_colonies`) — this is the
+//! one real evolution of the original "fully stateless" design: the
+//! counter itself is persistent, but colonies still have no persistent
+//! *identity*, so merges and splits just fall out of recomputing connected
+//! components fresh every pass.
 
 use crate::balance::{
-    PREDATION_CONSUME_CHANCE, PREDATOR_GROWTH_CAP, PREDATOR_GROWTH_PER_ADJACENT_PREY,
-    PREY_CONTENTION_PENALTY, PREY_GROWTH_PER_OPEN_ADJACENT, PREY_PREDATOR_SUPPRESSION,
+    COLONY_SPILLOVER_THRESHOLD, COLONY_STARVATION_THRESHOLD, GROWTH_NONLINEAR_ACCEL_FACTOR,
+    GROWTH_RATE_CAP, PREDATOR_FALL_RATE_AT_ZERO_PREY, PREDATOR_MIN_ADJACENT_PREY_THRESHOLD,
+    PREDATOR_RISE_RATE_PER_EXCESS_PREY, PREY_CONTENTION_PENALTY, PREY_GROWTH_PER_OPEN_ADJACENT,
+    PREY_PREDATOR_SUPPRESSION,
 };
-use crate::board::Board;
+use crate::board::{Board, Colony, Direction};
+use crate::hex::Hex;
 use crate::species::{self, FoodWebEdge, Species, Tier};
+use crate::terrain::Terrain;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
-/// Per-token growth score for one existing animal, evaluated against its
-/// current terrain-scoped neighborhood only.
-fn token_growth_score(board: &Board, edges: &[FoodWebEdge], hex: crate::hex::Hex, species: Species) -> f32 {
-    let terrain = *board
-        .terrain
-        .get(&hex)
-        .expect("animal token always sits on a placed terrain tile");
-    let tier = species::tier(edges, species);
-    let neighbors = board.neighbors_in_bounds(&hex);
+#[derive(Debug, Default, Clone)]
+pub struct GrowthReport {
+    pub spillovers: HashMap<Species, usize>,
+    pub starvations: HashMap<Species, usize>,
+}
 
-    let mut score = 0.0f32;
+/// Every in-bounds neighbor of any colony member tile that isn't itself a
+/// member — the colony's shared "border," aggregated across its whole
+/// footprint rather than one tile's immediate neighbors.
+fn colony_border(board: &Board, tiles: &[Hex]) -> Vec<Hex> {
+    let members: HashSet<Hex> = tiles.iter().copied().collect();
+    let mut border: HashSet<Hex> = HashSet::new();
+    for &hex in tiles {
+        for n in board.neighbors_in_bounds(&hex) {
+            if !members.contains(&n) {
+                border.insert(n);
+            }
+        }
+    }
+    border.into_iter().collect()
+}
+
+/// Favorable/unfavorable conditions compound rather than adding linearly
+/// (brief: "the rate ... is non-linear"), capped so one extreme
+/// neighborhood can't cause an unbounded single-pass jump.
+fn nonlinear_rate(pressure: f32) -> f32 {
+    let rate = pressure * (1.0 + GROWTH_NONLINEAR_ACCEL_FACTOR * pressure.abs());
+    rate.clamp(-GROWTH_RATE_CAP, GROWTH_RATE_CAP)
+}
+
+/// One colony's raw pressure this pass. A Mid-tier species combines both
+/// components (it's simultaneously prey-role and predator-role within the
+/// same terrain); Apex only ever computes the predator component, Base
+/// only ever the prey component.
+fn colony_pressure(board: &Board, edges: &[FoodWebEdge], colony: &Colony, border: &[Hex]) -> f32 {
+    let tier = species::tier(edges, colony.species);
+    let mut pressure = 0.0f32;
 
     if tier != Tier::Apex {
-        // Prey-role component: open space grows it, contending prey and
-        // adjacent predators slow it (boom-bust, not flat suppression).
-        let predators = species::predators_of(edges, terrain, species);
         let mut n_open = 0u32;
         let mut n_predator = 0u32;
         let mut n_contention = 0u32;
-        for n in &neighbors {
-            match board.animals.get(n) {
+        for &b in border {
+            match board.animals.get(&b) {
                 None => {
-                    if board.terrain.contains_key(n) {
+                    if board.terrain.contains_key(&b) {
                         n_open += 1;
                     }
                 }
-                Some(&occupant) if occupant == species => {}
-                Some(&occupant) if predators.contains(&occupant) => n_predator += 1,
-                Some(&occupant) if species::tier(edges, occupant) != Tier::Apex => {
-                    // A different, non-apex (i.e. itself prey-role) species
-                    // adjacent = competing for the same open space.
-                    n_contention += 1;
-                }
-                Some(_) => {}
-            }
-        }
-        let prey_component = n_open as f32 * PREY_GROWTH_PER_OPEN_ADJACENT
-            - n_contention as f32 * PREY_CONTENTION_PENALTY
-            - n_predator as f32 * PREY_PREDATOR_SUPPRESSION;
-        score += prey_component.max(0.0);
-    }
-
-    if tier != Tier::Base {
-        let prey = species::prey_of(edges, terrain, species);
-        let n_prey_adjacent = neighbors
-            .iter()
-            .filter(|n| board.animals.get(*n).map(|s| prey.contains(s)).unwrap_or(false))
-            .count() as f32;
-        let predator_component =
-            (n_prey_adjacent * PREDATOR_GROWTH_PER_ADJACENT_PREY).min(PREDATOR_GROWTH_CAP);
-        score += predator_component;
-    }
-
-    score
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct GrowthReport {
-    pub spawned: HashMap<Species, usize>,
-    pub consumed: HashMap<Species, usize>,
-}
-
-/// Direct predation: each predator token independently rolls a chance to
-/// eat one adjacent prey token outright. Evaluated against the same
-/// pass-start board snapshot as growth (nothing here has been mutated yet),
-/// so a token can't be both a hunter and prey removed by someone else's
-/// roll within the same pass — the removal set is deduped and applied by
-/// the caller once every token has been considered.
-fn run_predation(board: &Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> (HashSet<crate::hex::Hex>, HashMap<Species, usize>) {
-    let mut predators: Vec<(crate::hex::Hex, Species)> = board.animals.iter().map(|(&h, &s)| (h, s)).collect();
-    predators.shuffle(rng);
-
-    let mut eaten: HashSet<crate::hex::Hex> = HashSet::new();
-    let mut consumed: HashMap<Species, usize> = HashMap::new();
-
-    for (hex, species) in predators {
-        if species::tier(edges, species) == Tier::Base {
-            continue;
-        }
-        let terrain = *board
-            .terrain
-            .get(&hex)
-            .expect("animal token always sits on a placed terrain tile");
-        let prey_species = species::prey_of(edges, terrain, species);
-        if prey_species.is_empty() {
-            continue;
-        }
-        let mut targets: Vec<crate::hex::Hex> = board
-            .neighbors_in_bounds(&hex)
-            .into_iter()
-            .filter(|n| !eaten.contains(n))
-            .filter(|n| board.animals.get(n).map(|s| prey_species.contains(s)).unwrap_or(false))
-            .collect();
-        if targets.is_empty() || rng.gen::<f32>() >= PREDATION_CONSUME_CHANCE {
-            continue;
-        }
-        targets.shuffle(rng);
-        let target = targets[0];
-        let prey_species = *board.animals.get(&target).unwrap();
-        eaten.insert(target);
-        *consumed.entry(prey_species).or_insert(0) += 1;
-    }
-
-    (eaten, consumed)
-}
-
-/// Runs one growth pass over the whole board: scores every existing token,
-/// spawns new tokens of each species onto eligible adjacent tiles, and lets
-/// predators consume adjacent prey.
-pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> GrowthReport {
-    let mut tokens_by_species: HashMap<Species, Vec<crate::hex::Hex>> = HashMap::new();
-    for (&hex, &sp) in board.animals.iter() {
-        tokens_by_species.entry(sp).or_default().push(hex);
-    }
-
-    let mut report = GrowthReport::default();
-    let mut all_spawns: Vec<(crate::hex::Hex, Species)> = Vec::new();
-
-    for (species, positions) in tokens_by_species.iter() {
-        let species = *species;
-        let total_score: f32 = positions
-            .iter()
-            .map(|&hex| token_growth_score(board, edges, hex, species))
-            .sum();
-        let spawn_budget = total_score.floor() as usize;
-        if spawn_budget == 0 {
-            continue;
-        }
-
-        let habitat_terrains = species::species_terrains(edges, species);
-        let mut candidates: HashSet<crate::hex::Hex> = HashSet::new();
-        for &hex in positions {
-            for n in board.neighbors_in_bounds(&hex) {
-                if board.animals.contains_key(&n) {
-                    continue;
-                }
-                if let Some(t) = board.terrain.get(&n) {
-                    if habitat_terrains.contains(t) {
-                        candidates.insert(n);
+                Some(&occupant) => {
+                    let Some(&terrain) = board.terrain.get(&b) else {
+                        continue;
+                    };
+                    let predators = species::predators_of(edges, terrain, colony.species);
+                    if predators.contains(&occupant) {
+                        n_predator += 1;
+                    } else if species::tier(edges, occupant) != Tier::Apex {
+                        n_contention += 1;
                     }
                 }
             }
         }
-
-        let mut candidates: Vec<crate::hex::Hex> = candidates.into_iter().collect();
-        candidates.shuffle(rng);
-        let take = spawn_budget.min(candidates.len());
-        for hex in candidates.into_iter().take(take) {
-            all_spawns.push((hex, species));
-        }
-        if take > 0 {
-            report.spawned.insert(species, take);
-        }
+        pressure += n_open as f32 * PREY_GROWTH_PER_OPEN_ADJACENT
+            - n_contention as f32 * PREY_CONTENTION_PENALTY
+            - n_predator as f32 * PREY_PREDATOR_SUPPRESSION;
     }
 
-    let (eaten, consumed) = run_predation(board, edges, rng);
-    report.consumed = consumed;
-
-    for hex in &eaten {
-        board.animals.remove(hex);
+    if tier != Tier::Base {
+        let mut n_prey = 0u32;
+        for &b in border {
+            if let Some(&occupant) = board.animals.get(&b) {
+                let Some(&terrain) = board.terrain.get(&b) else {
+                    continue;
+                };
+                if species::prey_of(edges, terrain, colony.species).contains(&occupant) {
+                    n_prey += 1;
+                }
+            }
+        }
+        pressure += if n_prey == 0 {
+            PREDATOR_FALL_RATE_AT_ZERO_PREY
+        } else if n_prey < PREDATOR_MIN_ADJACENT_PREY_THRESHOLD {
+            0.0
+        } else {
+            (n_prey - PREDATOR_MIN_ADJACENT_PREY_THRESHOLD + 1) as f32 * PREDATOR_RISE_RATE_PER_EXCESS_PREY
+        };
     }
-    for (hex, species) in all_spawns {
-        board.animals.insert(hex, species);
+
+    pressure
+}
+
+struct Outcome {
+    species: Species,
+    tiles: Vec<Hex>,
+    new_counter: f32,
+    direction: Direction,
+    spill_target: Option<Hex>,
+    starve_tile: Option<Hex>,
+}
+
+/// Runs one growth pass: every colony's counter is advanced by this pass's
+/// rate, colonies at/above the spillover threshold gain one new tile
+/// (merging into whichever colony already occupies that hex, if any, the
+/// next time colonies are recomputed), and colonies at/below the
+/// starvation threshold lose one tile — symmetric, one tile per pass in
+/// either direction, until a starving colony is gone entirely.
+pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> GrowthReport {
+    let colonies = board.animal_colonies();
+    let mut report = GrowthReport::default();
+
+    // Phase 1: compute every colony's outcome against the pre-pass board —
+    // nothing is mutated here, so colonies can't see each other's changes.
+    let mut outcomes = Vec::with_capacity(colonies.len());
+    for colony in &colonies {
+        let border = colony_border(board, &colony.tiles);
+        let pressure = colony_pressure(board, edges, colony, &border);
+        let rate = nonlinear_rate(pressure);
+        let prev = board.colony_counter(&colony.tiles);
+        let new_counter = prev + rate;
+        let direction = if rate > 0.01 {
+            Direction::Rising
+        } else if rate < -0.01 {
+            Direction::Falling
+        } else {
+            Direction::Flat
+        };
+
+        let spill_target = if new_counter >= COLONY_SPILLOVER_THRESHOLD {
+            let habitat_terrains: HashSet<Terrain> =
+                colony.tiles.iter().filter_map(|h| board.terrain.get(h).copied()).collect();
+            let mut candidates: Vec<Hex> = border
+                .iter()
+                .copied()
+                .filter(|b| {
+                    !board.animals.contains_key(b)
+                        && board.terrain.get(b).map(|t| habitat_terrains.contains(t)).unwrap_or(false)
+                })
+                .collect();
+            candidates.shuffle(rng);
+            candidates.into_iter().next()
+        } else {
+            None
+        };
+
+        let starve_tile = if new_counter <= COLONY_STARVATION_THRESHOLD {
+            let mut members = colony.tiles.clone();
+            members.shuffle(rng);
+            members.into_iter().next()
+        } else {
+            None
+        };
+
+        outcomes.push(Outcome {
+            species: colony.species,
+            tiles: colony.tiles.clone(),
+            new_counter,
+            direction,
+            spill_target,
+            starve_tile,
+        });
+    }
+
+    // Phase 2: apply. Spillover targets are deduped across colonies here —
+    // two colonies computed against the same pre-pass snapshot could both
+    // have picked the same empty border hex; first-computed wins, the
+    // other simply doesn't get its tile this pass (its counter still
+    // updates normally, it just tries again next pass).
+    let mut claimed_spill_targets: HashSet<Hex> = HashSet::new();
+    for outcome in outcomes {
+        if let Some(starve_hex) = outcome.starve_tile {
+            board.remove_animal(&starve_hex);
+            *report.starvations.entry(outcome.species).or_insert(0) += 1;
+        }
+        let surviving_tiles: Vec<Hex> =
+            outcome.tiles.into_iter().filter(|h| Some(*h) != outcome.starve_tile).collect();
+        if !surviving_tiles.is_empty() {
+            board.set_colony_state(&surviving_tiles, outcome.new_counter, outcome.direction);
+        }
+        if let Some(spill_hex) = outcome.spill_target {
+            if claimed_spill_targets.insert(spill_hex) {
+                // Inserted directly rather than through `Board::place_animal`,
+                // which would re-run occupancy/eligibility checks against a
+                // board this phase has already been mutating.
+                board.animals.insert(spill_hex, outcome.species);
+                board.animal_counters.insert(spill_hex, outcome.new_counter);
+                board.animal_directions.insert(spill_hex, outcome.direction);
+                *report.spillovers.entry(outcome.species).or_insert(0) += 1;
+            }
+        }
     }
 
     report
