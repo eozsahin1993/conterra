@@ -3,11 +3,18 @@
 //! (`board::animal_colonies`); colonies have no persistent identity, so
 //! merges and splits just fall out of recomputing connected components
 //! fresh every pass.
+//!
+//! Growth is Fibonacci-shaped: a colony can gain its own *previous*
+//! population as new growth each pass (`next = current + previous`), but
+//! that growth potential is scaled down by how crowded/threatened its
+//! border is, and direct losses from contention, predation, or lack of
+//! prey subtract off on top — so a colony in ideal conditions genuinely
+//! runs the Fibonacci sequence, while a crowded or heavily-predated one
+//! dampens toward flat or outright declines.
 
 use crate::balance::{
-    COLONY_SPILLOVER_THRESHOLD, COLONY_STARVATION_THRESHOLD, GROWTH_NONLINEAR_ACCEL_FACTOR,
-    GROWTH_RATE_CAP, PREDATOR_FALL_RATE_AT_ZERO_PREY, PREDATOR_MIN_ADJACENT_PREY_THRESHOLD,
-    PREDATOR_RISE_RATE_PER_EXCESS_PREY, PREY_CONTENTION_PENALTY, PREY_GROWTH_PER_OPEN_ADJACENT,
+    COLONY_SPILLOVER_THRESHOLD_PER_TILE, COLONY_STARVATION_THRESHOLD, GROWTH_RATE_CAP,
+    PREDATOR_FALL_RATE_AT_ZERO_PREY, PREDATOR_FULL_GROWTH_PREY_COUNT, PREY_CONTENTION_PENALTY,
     PREY_PREDATOR_SUPPRESSION,
 };
 use crate::board::{Board, Colony, Direction};
@@ -39,17 +46,10 @@ fn colony_border(board: &Board, tiles: &[Hex]) -> Vec<Hex> {
     border.into_iter().collect()
 }
 
-/// Pressure compounds rather than scaling linearly, capped so one extreme
-/// neighborhood can't cause an unbounded single-pass jump.
-fn nonlinear_rate(pressure: f32) -> f32 {
-    let rate = pressure * (1.0 + GROWTH_NONLINEAR_ACCEL_FACTOR * pressure.abs());
-    rate.clamp(-GROWTH_RATE_CAP, GROWTH_RATE_CAP)
-}
-
 /// The raw counts a colony's rate is built from — surfaced (not just the
-/// blended pressure number) so a player can see *why* a colony is
-/// growing or shrinking: how much open space it has, how many predators
-/// or competing prey border it, how much prey a predator colony can reach.
+/// blended rate number) so a player can see *why* a colony is growing or
+/// shrinking: how much open space it has, how many predators or competing
+/// prey border it, how much prey a predator colony can reach.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ColonyFactors {
     pub open_adjacent: u32,
@@ -58,19 +58,22 @@ pub struct ColonyFactors {
     pub prey_adjacent: u32,
 }
 
-/// One colony's border factors and resulting pressure this pass. A
-/// Mid-tier species combines both components (it's simultaneously
+/// One colony's border factors and the population change (`rate`) they
+/// produce this pass, given its current `previous_counter` (the Fibonacci
+/// term). A Mid-tier species combines both components (it's simultaneously
 /// prey-role and predator-role within the same terrain); Apex only ever
 /// computes the predator component, Base only ever the prey component.
-fn colony_factors_and_pressure(
+fn colony_factors_and_rate(
     board: &Board,
     edges: &[FoodWebEdge],
     colony: &Colony,
     border: &[Hex],
+    previous_counter: f32,
 ) -> (ColonyFactors, f32) {
     let tier = species::tier(edges, colony.species);
     let mut factors = ColonyFactors::default();
-    let mut pressure = 0.0f32;
+    let growth_potential = previous_counter.max(0.0);
+    let mut rate = 0.0f32;
 
     if tier != Tier::Apex {
         for &b in border {
@@ -93,9 +96,12 @@ fn colony_factors_and_pressure(
                 }
             }
         }
-        pressure += factors.open_adjacent as f32 * PREY_GROWTH_PER_OPEN_ADJACENT
-            - factors.contending_adjacent as f32 * PREY_CONTENTION_PENALTY
-            - factors.predator_adjacent as f32 * PREY_PREDATOR_SUPPRESSION;
+        let threat = (factors.contending_adjacent + factors.predator_adjacent) as f32;
+        let total = factors.open_adjacent as f32 + threat;
+        let room_factor = if total > 0.0 { (factors.open_adjacent as f32 / total).clamp(0.0, 1.0) } else { 0.0 };
+        let losses = factors.contending_adjacent as f32 * PREY_CONTENTION_PENALTY
+            + factors.predator_adjacent as f32 * PREY_PREDATOR_SUPPRESSION;
+        rate += growth_potential * room_factor - losses;
     }
 
     if tier != Tier::Base {
@@ -109,40 +115,44 @@ fn colony_factors_and_pressure(
                 }
             }
         }
-        let n_prey = factors.prey_adjacent;
-        pressure += if n_prey == 0 {
-            PREDATOR_FALL_RATE_AT_ZERO_PREY
-        } else if n_prey < PREDATOR_MIN_ADJACENT_PREY_THRESHOLD {
-            0.0
-        } else {
-            (n_prey - PREDATOR_MIN_ADJACENT_PREY_THRESHOLD + 1) as f32 * PREDATOR_RISE_RATE_PER_EXCESS_PREY
-        };
+        let prey_factor = (factors.prey_adjacent as f32 / PREDATOR_FULL_GROWTH_PREY_COUNT as f32).clamp(0.0, 1.0);
+        let zero_prey_penalty = if factors.prey_adjacent == 0 { PREDATOR_FALL_RATE_AT_ZERO_PREY } else { 0.0 };
+        rate += growth_potential * prey_factor + zero_prey_penalty;
     }
 
-    (factors, pressure)
+    (factors, rate.clamp(-GROWTH_RATE_CAP, GROWTH_RATE_CAP))
 }
 
-/// This colony's current factors and the rate a growth pass would apply
-/// right now — used to preview info (e.g. a hover tooltip) without
-/// waiting for or mutating anything.
+/// This colony's spillover threshold — scales with how many tiles it
+/// already has, so a bigger colony needs proportionally more population to
+/// justify spreading further rather than a flat number regardless of size.
+pub fn colony_spillover_threshold(colony_size: usize) -> f32 {
+    COLONY_SPILLOVER_THRESHOLD_PER_TILE * colony_size.max(1) as f32
+}
+
+/// This colony's current factors and the population change a growth pass
+/// would apply right now — used to preview info (e.g. a hover tooltip)
+/// without waiting for or mutating anything.
 pub fn colony_preview(board: &Board, edges: &[FoodWebEdge], colony: &Colony) -> (ColonyFactors, f32) {
     let border = colony_border(board, &colony.tiles);
-    let (factors, pressure) = colony_factors_and_pressure(board, edges, colony, &border);
-    (factors, nonlinear_rate(pressure))
+    let previous = board.colony_previous_counter(&colony.tiles);
+    colony_factors_and_rate(board, edges, colony, &border, previous)
 }
 
 struct Outcome {
     species: Species,
     tiles: Vec<Hex>,
     new_counter: f32,
+    new_previous: f32,
     direction: Direction,
     spill_target: Option<Hex>,
     starve_tile: Option<Hex>,
 }
 
-/// Runs one growth pass: advances every colony's counter, spills over one
-/// tile per pass at/above threshold, starves one tile per pass at/below
-/// threshold.
+/// Runs one growth pass: advances every colony's population (Fibonacci-
+/// shaped, dampened/reversed by crowding and predation), spills over one
+/// tile per pass once population is at/above `colony_spillover_threshold`,
+/// starves one tile per pass at/below `COLONY_STARVATION_THRESHOLD`.
 pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl Rng) -> GrowthReport {
     let colonies = board.animal_colonies();
     let mut report = GrowthReport::default();
@@ -152,10 +162,12 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
     let mut outcomes = Vec::with_capacity(colonies.len());
     for colony in &colonies {
         let border = colony_border(board, &colony.tiles);
-        let (_, pressure) = colony_factors_and_pressure(board, edges, colony, &border);
-        let rate = nonlinear_rate(pressure);
-        let prev = board.colony_counter(&colony.tiles);
-        let new_counter = prev + rate;
+        let current = board.colony_counter(&colony.tiles);
+        let previous = board.colony_previous_counter(&colony.tiles);
+        let (_, rate) = colony_factors_and_rate(board, edges, colony, &border, previous);
+
+        let new_counter = (current + rate).round();
+        let new_previous = current.round();
         let direction = if rate > 0.01 {
             Direction::Rising
         } else if rate < -0.01 {
@@ -164,7 +176,8 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
             Direction::Flat
         };
 
-        let spill_target = if new_counter >= COLONY_SPILLOVER_THRESHOLD {
+        let threshold = colony_spillover_threshold(colony.tiles.len());
+        let spill_target = if new_counter >= threshold {
             let habitat_terrains: HashSet<Terrain> =
                 colony.tiles.iter().filter_map(|h| board.terrain.get(h).copied()).collect();
             let mut candidates: Vec<Hex> = border
@@ -193,6 +206,7 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
             species: colony.species,
             tiles: colony.tiles.clone(),
             new_counter,
+            new_previous,
             direction,
             spill_target,
             starve_tile,
@@ -211,7 +225,7 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
         let surviving_tiles: Vec<Hex> =
             outcome.tiles.into_iter().filter(|h| Some(*h) != outcome.starve_tile).collect();
         if !surviving_tiles.is_empty() {
-            board.set_colony_state(&surviving_tiles, outcome.new_counter, outcome.direction);
+            board.set_colony_state(&surviving_tiles, outcome.new_counter, outcome.new_previous, outcome.direction);
         }
         if let Some(spill_hex) = outcome.spill_target {
             if claimed_spill_targets.insert(spill_hex) {
@@ -220,6 +234,7 @@ pub fn run_growth_pass(board: &mut Board, edges: &[FoodWebEdge], rng: &mut impl 
                 // mutated by this phase.
                 board.animals.insert(spill_hex, outcome.species);
                 board.animal_counters.insert(spill_hex, outcome.new_counter);
+                board.animal_previous_counters.insert(spill_hex, outcome.new_previous);
                 board.animal_directions.insert(spill_hex, outcome.direction);
                 *report.spillovers.entry(outcome.species).or_insert(0) += 1;
             }

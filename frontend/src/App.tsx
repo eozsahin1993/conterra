@@ -38,8 +38,8 @@ function GameScreen() {
             terrain={s().terrain}
             animals={s().animals}
             armed={selectedOption() !== null && isMyTurn()}
-            spilloverThreshold={s().colony_spillover_threshold}
             starvationThreshold={s().colony_starvation_threshold}
+            minMatchingSeams={s().placement_min_matching_seams}
             onHexClick={handleHexClick}
           />
         </div>

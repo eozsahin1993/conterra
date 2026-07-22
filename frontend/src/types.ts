@@ -26,6 +26,7 @@ export interface AnimalTileInfo {
   direction: Direction;
   colony_size: number;
   rate: number;
+  spillover_threshold: number;
   open_adjacent: number;
   contending_adjacent: number;
   predator_adjacent: number;
@@ -62,8 +63,8 @@ export interface StateSnapshot {
   my_objective: SecretObjective | null;
   last_spillover: [Species, number][] | null;
   last_starvation: [Species, number][] | null;
-  colony_spillover_threshold: number;
   colony_starvation_threshold: number;
+  placement_min_matching_seams: number;
 }
 
 export interface PlayerResult {

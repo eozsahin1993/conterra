@@ -3,10 +3,10 @@
 //! player's own secret objective is included but everyone else's stays off
 //! the wire entirely.
 
-use crate::balance::{COLONY_SPILLOVER_THRESHOLD, COLONY_STARVATION_THRESHOLD};
+use crate::balance::{COLONY_STARVATION_THRESHOLD, PLACEMENT_MIN_MATCHING_SEAMS};
 use crate::board::Direction;
 use crate::game::{GamePhase, GameResult, GameSession, PlacementInput, PlayerId};
-use crate::growth::colony_preview;
+use crate::growth::{colony_preview, colony_spillover_threshold};
 use crate::hex::Hex;
 use crate::market::MarketOption;
 use crate::objectives::SecretObjective;
@@ -52,6 +52,9 @@ pub struct AnimalTileInfo {
     pub direction: Direction,
     pub colony_size: usize,
     pub rate: f32,
+    /// This colony's spillover threshold — scales with `colony_size`, so
+    /// it's meaningfully different per colony, not one flat number.
+    pub spillover_threshold: f32,
     pub open_adjacent: u32,
     pub contending_adjacent: u32,
     pub predator_adjacent: u32,
@@ -73,10 +76,13 @@ pub struct StateSnapshot {
     pub my_objective: Option<SecretObjective>,
     pub last_spillover: Option<Vec<(Species, usize)>>,
     pub last_starvation: Option<Vec<(Species, usize)>>,
-    /// Sent so the frontend's distance-to-threshold hint always matches
-    /// whatever these are actually tuned to server-side.
-    pub colony_spillover_threshold: f32,
+    /// Flat (not scaled by colony size, unlike spillover) — a colony's
+    /// total population genuinely hitting zero means it's gone regardless
+    /// of how many tiles it spans.
     pub colony_starvation_threshold: f32,
+    /// So the frontend's placement preview can mirror `can_place_shape`'s
+    /// seam rule exactly rather than assuming a value.
+    pub placement_min_matching_seams: usize,
 }
 
 impl StateSnapshot {
@@ -127,6 +133,7 @@ impl StateSnapshot {
                             direction: session.board.animal_directions.get(h).copied().unwrap_or(Direction::Flat),
                             colony_size: view.map(|v| v.size).unwrap_or(1),
                             rate: view.map(|v| v.rate).unwrap_or(0.0),
+                            spillover_threshold: colony_spillover_threshold(view.map(|v| v.size).unwrap_or(1)),
                             open_adjacent: view.map(|v| v.factors.open_adjacent).unwrap_or(0),
                             contending_adjacent: view.map(|v| v.factors.contending_adjacent).unwrap_or(0),
                             predator_adjacent: view.map(|v| v.factors.predator_adjacent).unwrap_or(0),
@@ -146,8 +153,8 @@ impl StateSnapshot {
                 .last_growth
                 .as_ref()
                 .map(|r| r.starvations.iter().map(|(s, n)| (*s, *n)).collect()),
-            colony_spillover_threshold: COLONY_SPILLOVER_THRESHOLD,
             colony_starvation_threshold: COLONY_STARVATION_THRESHOLD,
+            placement_min_matching_seams: PLACEMENT_MIN_MATCHING_SEAMS,
         }
     }
 }

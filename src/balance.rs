@@ -2,10 +2,12 @@
 //! playtests rather than from first principles.
 
 /// Board radius (see `Hex::spiral_from_origin`) — generous size is the
-/// primary lever against placement difficulty. Bumped up from 6: with the
-/// seam-matching placement rule added, a smaller board runs out of legal
-/// spots too quickly.
-pub const BOARD_RADIUS: i32 = 10;
+/// primary lever against placement difficulty. Was 10, but the frontend hex
+/// render size grew (26px -> 34px) and this was shrunk back down to keep
+/// the on-screen map footprint roughly the same; with the seam-matching
+/// placement rule, watch for the board running out of legal spots too
+/// quickly and retune from playtests if so.
+pub const BOARD_RADIUS: i32 = 7;
 
 /// Market row size — fixed at 4, not tunable.
 pub const MARKET_ROW_SIZE: usize = 4;
@@ -20,7 +22,8 @@ pub const TERRAIN_SHAPE_SIZE: usize = 4;
 /// legal — not all 4: since a piece's own internal terrain layout isn't
 /// chosen with the board in mind, requiring every touching hex to match
 /// made most placements impossible once the board had any real shape.
-pub const PLACEMENT_MIN_MATCHING_SEAMS: usize = 2;
+/// Lowered from 2 to 1 after that was still too restrictive in practice.
+pub const PLACEMENT_MIN_MATCHING_SEAMS: usize = 1;
 
 /// Each terrain-shape piece mixes 2-3 distinct terrain types across its 4
 /// hexes — never one uniform terrain, never all 4 different.
@@ -38,46 +41,47 @@ pub const HABITAT_THRESHOLD_MID: usize = 6;
 pub const HABITAT_THRESHOLD_APEX: usize = 9;
 
 /// Unified per-tile-colony growth/starvation counter. Adjacent same-species
-/// tiles share one counter (`board::animal_colonies`), so these magnitudes
-/// apply to a colony's aggregate border, not one tile in isolation.
+/// tiles share one counter (`board::animal_colonies`).
 ///
-/// Prey-role pressure: rises per open/uncontested bordering hex.
-pub const PREY_GROWTH_PER_OPEN_ADJACENT: f32 = 1.0;
+/// Growth is Fibonacci-shaped: each pass a colony can gain its own
+/// *previous* population as new growth (`next = current + previous`),
+/// dampened by crowding/predation. A freshly-placed token starts here, with
+/// this as its seed "previous" — under ideal conditions the first few
+/// passes run the real Fibonacci sequence (2, 3, 5, 8, 13, ...).
+pub const INITIAL_POPULATION: f32 = 2.0;
+pub const INITIAL_PREVIOUS_POPULATION: f32 = 1.0;
+
 /// Penalty per bordering contending prey (a different, non-apex species
-/// competing for the same space).
+/// competing for the same space) — subtracted directly from population,
+/// and also counts against the "room" available for growth.
 pub const PREY_CONTENTION_PENALTY: f32 = 0.5;
-/// Penalty per bordering predator (boom-bust — scales with predator count,
-/// can drive pressure negative). Raised from 2.0: prey needs to decline
-/// faster under real predation pressure so a predator's own food supply
-/// isn't effectively infinite.
+/// Penalty per bordering predator — subtracted directly from population
+/// (being eaten), and also counts against available room. Boom-bust, not
+/// flat suppression: scales with predator count.
 pub const PREY_PREDATOR_SUPPRESSION: f32 = 3.0;
 
-/// Predator-role: minimum bordering prey count to be thriving (rising)
-/// rather than merely surviving (flat). Raised from 2: a predator colony
-/// needs more surrounding prey to justify further growth as it expands
-/// into thinner territory.
-pub const PREDATOR_MIN_ADJACENT_PREY_THRESHOLD: u32 = 3;
-/// Pressure per unit of bordering prey above the minimum threshold.
-/// Lowered from 1.0 — a big predator colony's border naturally touches
-/// more prey tiles just by being bigger, so this needed to be weaker to
-/// avoid unbounded runaway growth (e.g. Lions spreading indefinitely).
-pub const PREDATOR_RISE_RATE_PER_EXCESS_PREY: f32 = 0.6;
-/// Pressure when there is zero bordering prey at all. Made more negative
-/// (was -2.0) so a predator colony that outruns its prey supply crashes
-/// noticeably faster instead of lingering.
+/// Predator-role: bordering prey count for *full* growth potential (prey
+/// factor caps at 1.0 here); scales linearly below this.
+pub const PREDATOR_FULL_GROWTH_PREY_COUNT: u32 = 3;
+/// Flat penalty applied when there is zero bordering prey at all — a
+/// predator colony that outruns its prey supply crashes noticeably fast
+/// rather than lingering.
 pub const PREDATOR_FALL_RATE_AT_ZERO_PREY: f32 = -4.0;
 
-/// Non-linear acceleration: `rate = pressure * (1 + FACTOR * |pressure|)`.
-pub const GROWTH_NONLINEAR_ACCEL_FACTOR: f32 = 0.15;
-/// Hard cap on a single pass's rate magnitude.
-pub const GROWTH_RATE_CAP: f32 = 6.0;
+/// Hard cap on the magnitude of a single pass's population change — real
+/// Fibonacci growth is unbounded, so this keeps numbers sane over a long
+/// game instead of letting a thriving colony's population explode.
+pub const GROWTH_RATE_CAP: f32 = 8.0;
 
-/// A colony at/above this spills over: one new tile per pass, on an
-/// adjacent open hex matching one of the colony's own terrains. Raised
-/// from 16 alongside the predator-growth slowdown above, so spillover
-/// isn't reached as trivially by a snowballing predator colony.
-pub const COLONY_SPILLOVER_THRESHOLD: f32 = 20.0;
+/// A colony spills over — one new tile per pass, on an adjacent open hex
+/// matching one of the colony's own terrains — once its population is at
+/// or above this amount *per tile it already has* (so a bigger colony
+/// needs proportionally more population to justify spreading further, not
+/// a fixed number regardless of size).
+pub const COLONY_SPILLOVER_THRESHOLD_PER_TILE: f32 = 8.0;
 /// A colony at/below this starves: one tile removed per pass until gone.
+/// Flat, not scaled by size — a colony's total population genuinely
+/// hitting zero means it's gone regardless of how many tiles it spans.
 pub const COLONY_STARVATION_THRESHOLD: f32 = 0.0;
 
 /// Minimum viable population: social species need this many on-map tokens

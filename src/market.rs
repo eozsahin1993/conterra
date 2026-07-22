@@ -290,18 +290,20 @@ mod tests {
         let offsets = vec![Hex::new(0, 0), Hex::new(5, 0), Hex::new(0, 5), Hex::new(5, 5)];
         let terrains = vec![Terrain::Forest; 4];
 
-        // Two pre-existing River tiles, each adjacent to a different one of
-        // the incoming (all-Forest) piece's hexes — two real mismatches.
-        board.place_terrain_shape(&[(Hex::new(1, 0), Terrain::River), (Hex::new(6, 0), Terrain::River)]);
-
-        // 2 of the 4 hexes touch a mismatch, the other 2 ((0,5) and (5,5))
-        // touch nothing existing — exactly PLACEMENT_MIN_MATCHING_SEAMS (2)
-        // are seam-safe, so this should be allowed.
+        // Three pre-existing River tiles, each adjacent to a different one
+        // of the incoming (all-Forest) piece's hexes — three mismatches,
+        // leaving exactly 1 hex ((5,5)) seam-safe: meets
+        // PLACEMENT_MIN_MATCHING_SEAMS (1), so this should be allowed.
+        board.place_terrain_shape(&[
+            (Hex::new(1, 0), Terrain::River),
+            (Hex::new(6, 0), Terrain::River),
+            (Hex::new(0, 4), Terrain::River),
+        ]);
         assert!(can_place_shape(&board, Hex::new(0, 0), &offsets, &terrains, 0));
 
-        // Add a third mismatch, adjacent to (0,5): now only 1 of the 4
-        // hexes ((5,5)) is seam-safe, below the minimum — should be rejected.
-        board.place_terrain_shape(&[(Hex::new(0, 4), Terrain::River)]);
+        // Add a fourth mismatch, adjacent to the last hex (5,5): now 0 of
+        // the 4 hexes are seam-safe, below the minimum — should be rejected.
+        board.place_terrain_shape(&[(Hex::new(6, 5), Terrain::River)]);
         assert!(!can_place_shape(&board, Hex::new(0, 0), &offsets, &terrains, 0));
     }
 }

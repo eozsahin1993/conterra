@@ -25,6 +25,9 @@ pub struct Board {
     /// holds the same value, replicated across members so colonies can
     /// merge/split freely without a separate stable colony id.
     pub animal_counters: HashMap<Hex, f32>,
+    /// The counter's value one pass ago — the second term Fibonacci-style
+    /// growth needs (`next = current + previous`, scaled by conditions).
+    pub animal_previous_counters: HashMap<Hex, f32>,
     pub animal_directions: HashMap<Hex, Direction>,
 }
 
@@ -37,6 +40,7 @@ impl Board {
             terrain: HashMap::new(),
             animals: HashMap::new(),
             animal_counters: HashMap::new(),
+            animal_previous_counters: HashMap::new(),
             animal_directions: HashMap::new(),
         }
     }
@@ -77,7 +81,8 @@ impl Board {
         }
         self.animals.insert(hex, species);
         // Synced to any adjacent colony's shared value on the next pass.
-        self.animal_counters.insert(hex, 0.0);
+        self.animal_counters.insert(hex, crate::balance::INITIAL_POPULATION);
+        self.animal_previous_counters.insert(hex, crate::balance::INITIAL_PREVIOUS_POPULATION);
         self.animal_directions.insert(hex, Direction::Flat);
         Ok(())
     }
@@ -86,6 +91,7 @@ impl Board {
     pub fn remove_animal(&mut self, hex: &Hex) {
         self.animals.remove(hex);
         self.animal_counters.remove(hex);
+        self.animal_previous_counters.remove(hex);
         self.animal_directions.remove(hex);
     }
 
@@ -183,10 +189,25 @@ impl Board {
             .fold(f32::NEG_INFINITY, f32::max)
     }
 
-    /// Writes the same counter and direction to every member tile.
-    pub fn set_colony_state(&mut self, tiles: &[Hex], counter: f32, direction: Direction) {
+    /// The colony's shared "previous population" — the second term the
+    /// Fibonacci-style growth step needs. Same max-on-merge tie-break as
+    /// `colony_counter`.
+    pub fn colony_previous_counter(&self, tiles: &[Hex]) -> f32 {
+        tiles
+            .iter()
+            .filter_map(|h| self.animal_previous_counters.get(h).copied())
+            .fold(f32::NEG_INFINITY, f32::max)
+    }
+
+    /// Writes the same counter, previous-counter, and direction to every
+    /// member tile. Population is always a whole number — `counter` and
+    /// `previous` are rounded here, once, so every caller gets this for free.
+    pub fn set_colony_state(&mut self, tiles: &[Hex], counter: f32, previous: f32, direction: Direction) {
+        let counter = counter.round();
+        let previous = previous.round();
         for h in tiles {
             self.animal_counters.insert(*h, counter);
+            self.animal_previous_counters.insert(*h, previous);
             self.animal_directions.insert(*h, direction);
         }
     }
