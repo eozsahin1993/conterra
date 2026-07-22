@@ -21,7 +21,8 @@ pub type PlayerId = Uuid;
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
-    #[serde(skip)]
+    // Never sent to clients directly — `protocol::PlayerSummary` is the
+    // wire type and omits this. Serialized here only for dev-state persistence.
     pub objective: Option<SecretObjective>,
 }
 
@@ -39,7 +40,7 @@ pub enum PlacementInput {
     Animal { hex: Hex },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerResult {
     pub player_id: PlayerId,
     pub name: String,
@@ -48,7 +49,7 @@ pub struct PlayerResult {
     pub score: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameResult {
     pub group_threshold_met: bool,
     pub total_population: u32,
@@ -74,7 +75,63 @@ pub struct GameSession {
     rng: StdRng,
 }
 
+/// Everything about a `GameSession` worth writing to the dev-state file
+/// (see `server::AppState::save_to_disk`). Leaves out `edges` (rebuilt from
+/// `market::species_edges()`, which is pure/deterministic) and `rng` (just
+/// reseeded on load) since neither is meaningfully "state" to restore.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedSession {
+    pub id: Uuid,
+    pub board: Board,
+    pub players: Vec<Player>,
+    pub turn_order: Vec<PlayerId>,
+    pub current_turn_idx: usize,
+    pub turns_taken: u32,
+    pub total_turns: u32,
+    pub terrain_row: Vec<MarketOption>,
+    pub animal_row: Vec<MarketOption>,
+    pub phase: GamePhase,
+    pub result: Option<GameResult>,
+    pub last_growth: Option<GrowthReport>,
+}
+
 impl GameSession {
+    pub fn to_persisted(&self) -> PersistedSession {
+        PersistedSession {
+            id: self.id,
+            board: self.board.clone(),
+            players: self.players.clone(),
+            turn_order: self.turn_order.clone(),
+            current_turn_idx: self.current_turn_idx,
+            turns_taken: self.turns_taken,
+            total_turns: self.total_turns,
+            terrain_row: self.terrain_row.clone(),
+            animal_row: self.animal_row.clone(),
+            phase: self.phase,
+            result: self.result.clone(),
+            last_growth: self.last_growth.clone(),
+        }
+    }
+
+    pub fn from_persisted(p: PersistedSession) -> Self {
+        GameSession {
+            id: p.id,
+            board: p.board,
+            edges: market::species_edges(),
+            players: p.players,
+            turn_order: p.turn_order,
+            current_turn_idx: p.current_turn_idx,
+            turns_taken: p.turns_taken,
+            total_turns: p.total_turns,
+            terrain_row: p.terrain_row,
+            animal_row: p.animal_row,
+            phase: p.phase,
+            result: p.result,
+            last_growth: p.last_growth,
+            rng: StdRng::from_entropy(),
+        }
+    }
+
     pub fn new_lobby(id: Uuid) -> Self {
         GameSession {
             id,
@@ -249,5 +306,29 @@ impl GameSession {
     /// Player-scoped objective the caller is allowed to see (their own only).
     pub fn my_objective(&self, player_id: PlayerId) -> Option<SecretObjective> {
         self.objective_for(player_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_round_trip_preserves_state_including_secret_objectives() {
+        let mut session = GameSession::new_lobby(Uuid::new_v4());
+        let pid = session.add_player("Tester".into()).unwrap();
+        session.start().unwrap();
+        assert!(session.my_objective(pid).is_some());
+
+        let json = serde_json::to_string(&session.to_persisted()).unwrap();
+        let restored: PersistedSession = serde_json::from_str(&json).unwrap();
+        let restored = GameSession::from_persisted(restored);
+
+        assert_eq!(restored.phase, GamePhase::InProgress);
+        assert_eq!(restored.turn_order, session.turn_order);
+        assert_eq!(restored.total_turns, session.total_turns);
+        assert_eq!(restored.board.terrain.len(), session.board.terrain.len());
+        assert_eq!(format!("{:?}", restored.my_objective(pid)), format!("{:?}", session.my_objective(pid)));
+        assert!(restored.my_objective(pid).is_some());
     }
 }

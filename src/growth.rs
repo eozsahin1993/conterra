@@ -23,9 +23,10 @@ use crate::species::{self, FoodWebEdge, Species, Tier};
 use crate::terrain::Terrain;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct GrowthReport {
     pub spillovers: HashMap<Species, usize>,
     pub starvations: HashMap<Species, usize>,

@@ -1,4 +1,4 @@
-use crate::game::{GamePhase, GameSession, PlayerId};
+use crate::game::{GamePhase, GameSession, PersistedSession, PlayerId};
 use crate::protocol::{ClientMessage, ServerMessage, StateSnapshot};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -6,7 +6,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -15,6 +15,19 @@ use uuid::Uuid;
 struct ManagedGame {
     session: GameSession,
     connections: HashMap<PlayerId, mpsc::UnboundedSender<Message>>,
+    host: Option<PlayerId>,
+}
+
+/// DEV-ONLY: naive full-state dump used so restarting the process (e.g. via
+/// `cargo watch`) doesn't wipe out an in-progress game. Rewritten wholesale
+/// after every mutation — no migrations, no locking across processes. If a
+/// game type's shape changes, loading old data will just fail and fall back
+/// to an empty state; delete this file any time you want a true fresh start.
+const DEV_STATE_FILE: &str = "dev_state.json";
+
+#[derive(Serialize, Deserialize)]
+struct PersistedGame {
+    session: PersistedSession,
     host: Option<PlayerId>,
 }
 
@@ -27,6 +40,59 @@ impl AppState {
     pub fn new() -> Self {
         AppState {
             games: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Loads `DEV_STATE_FILE` if present, otherwise starts empty. See the
+    /// file-level comment on `DEV_STATE_FILE` — this is a dev convenience,
+    /// not a real persistence layer.
+    pub async fn load_from_disk() -> Self {
+        let state = AppState::new();
+        let Ok(contents) = tokio::fs::read_to_string(DEV_STATE_FILE).await else {
+            return state;
+        };
+        let Ok(persisted) = serde_json::from_str::<HashMap<Uuid, PersistedGame>>(&contents) else {
+            tracing::warn!("{DEV_STATE_FILE} exists but failed to parse — ignoring, starting fresh");
+            return state;
+        };
+        let count = persisted.len();
+        let mut games = state.games.lock().await;
+        for (id, pg) in persisted {
+            games.insert(
+                id,
+                Arc::new(Mutex::new(ManagedGame {
+                    session: GameSession::from_persisted(pg.session),
+                    connections: HashMap::new(),
+                    host: pg.host,
+                })),
+            );
+        }
+        drop(games);
+        tracing::info!("Loaded dev game state from {DEV_STATE_FILE} ({count} games)");
+        state
+    }
+
+    /// Dumps every game's state to `DEV_STATE_FILE`. Called after every
+    /// mutating client message — see the file-level comment on
+    /// `DEV_STATE_FILE`.
+    async fn save_to_disk(&self) {
+        let games = self.games.lock().await;
+        let mut persisted: HashMap<Uuid, PersistedGame> = HashMap::with_capacity(games.len());
+        for (&id, game_arc) in games.iter() {
+            let game = game_arc.lock().await;
+            persisted.insert(
+                id,
+                PersistedGame {
+                    session: game.session.to_persisted(),
+                    host: game.host,
+                },
+            );
+        }
+        drop(games);
+        if let Ok(json) = serde_json::to_string_pretty(&persisted) {
+            if let Err(e) = tokio::fs::write(DEV_STATE_FILE, json).await {
+                tracing::warn!("failed to write {DEV_STATE_FILE}: {e}");
+            }
         }
     }
 }
@@ -59,6 +125,7 @@ async fn create_game(State(state): State<AppState>) -> Json<CreateGameResponse> 
         host: None,
     };
     state.games.lock().await.insert(id, Arc::new(Mutex::new(managed)));
+    state.save_to_disk().await;
     Json(CreateGameResponse { game_id: id })
 }
 
@@ -185,6 +252,8 @@ async fn handle_socket(socket: WebSocket, game_id: Uuid, state: AppState) {
                 }
             }
         }
+        drop(game);
+        state.save_to_disk().await;
     }
 
     if let Some(pid) = player_id {

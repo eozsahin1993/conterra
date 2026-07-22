@@ -14,20 +14,48 @@ pub enum Direction {
     Falling,
 }
 
+/// serde_json requires string object keys, but `Hex` is a struct — every
+/// `HashMap<Hex, _>` field below goes through this adapter (as a `[Hex, V]`
+/// pair array instead) so `Board` can round-trip through JSON at all.
+mod hex_map_json {
+    use crate::hex::Hex;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S, V: Serialize>(map: &HashMap<Hex, V>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        map.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D, V: Deserialize<'de>>(deserializer: D) -> Result<HashMap<Hex, V>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Vec::<(Hex, V)>::deserialize(deserializer)?.into_iter().collect())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Board {
     pub radius: i32,
     valid_hexes: HashSet<Hex>,
+    #[serde(with = "hex_map_json")]
     pub terrain: HashMap<Hex, Terrain>,
+    #[serde(with = "hex_map_json")]
     pub animals: HashMap<Hex, Species>,
     /// Persistent per-tile colony counter. Every tile in a colony
     /// (connected component of same-species tiles, see `animal_colonies`)
     /// holds the same value, replicated across members so colonies can
     /// merge/split freely without a separate stable colony id.
+    #[serde(with = "hex_map_json")]
     pub animal_counters: HashMap<Hex, f32>,
     /// The counter's value one pass ago — the second term Fibonacci-style
     /// growth needs (`next = current + previous`, scaled by conditions).
+    #[serde(with = "hex_map_json")]
     pub animal_previous_counters: HashMap<Hex, f32>,
+    #[serde(with = "hex_map_json")]
     pub animal_directions: HashMap<Hex, Direction>,
 }
 
