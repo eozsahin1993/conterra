@@ -52,6 +52,9 @@ fn colony_border(board: &Board, tiles: &[Hex]) -> Vec<Hex> {
 /// prey border it, how much prey a predator colony can reach.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ColonyFactors {
+    /// Empty adjacent hexes whose terrain matches one the colony already
+    /// occupies — an empty hex of a terrain this species can't settle on
+    /// doesn't count as room to grow into.
     pub open_adjacent: u32,
     pub contending_adjacent: u32,
     pub predator_adjacent: u32,
@@ -74,12 +77,14 @@ fn colony_factors_and_rate(
     let mut factors = ColonyFactors::default();
     let growth_potential = previous_counter.max(0.0);
     let mut rate = 0.0f32;
+    let habitat_terrains: HashSet<Terrain> =
+        colony.tiles.iter().filter_map(|h| board.terrain.get(h).copied()).collect();
 
     if tier != Tier::Apex {
         for &b in border {
             match board.animals.get(&b) {
                 None => {
-                    if board.terrain.contains_key(&b) {
+                    if board.terrain.get(&b).map(|t| habitat_terrains.contains(t)).unwrap_or(false) {
                         factors.open_adjacent += 1;
                     }
                 }
