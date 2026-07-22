@@ -93,8 +93,12 @@ fn colony_factors_and_rate(
                         continue;
                     };
                     let predators = species::predators_of(edges, terrain, colony.species);
+                    let prey = species::prey_of(edges, terrain, colony.species);
                     if predators.contains(&occupant) {
                         factors.predator_adjacent += 1;
+                    } else if prey.contains(&occupant) {
+                        // Own food, not a competitor — counted as
+                        // `prey_adjacent` by the predator-role block below.
                     } else if species::tier(edges, occupant) != Tier::Apex {
                         factors.contending_adjacent += 1;
                     }
